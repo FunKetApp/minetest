@@ -1,4 +1,7 @@
-﻿Minetest
+﻿This is a fork of Minetest. we use the 0.4.11 and update some UI.
+you can always use the lastest version if you want. check https://github.com/minetest for details.
+
+Minetest
 ========
 
 An InfiniMiner/Minecraft inspired game.
