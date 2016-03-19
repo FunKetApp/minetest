@@ -24,7 +24,6 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "common/c_content.h"
 #include "environment.h"
 #include "map.h"
-#include "gamedef.h"
 #include "nodemetadata.h"
 
 
@@ -44,7 +43,7 @@ NodeMetadata* NodeMetaRef::getmeta(NodeMetaRef *ref, bool auto_create)
 {
 	NodeMetadata *meta = ref->m_env->getMap().getNodeMetadata(ref->m_p);
 	if(meta == NULL && auto_create)	{
-		meta = new NodeMetadata(ref->m_env->getGameDef()->idef());
+		meta = new NodeMetadata(ref->m_env->getGameDef());
 		if(!ref->m_env->getMap().setNodeMetadata(ref->m_p, meta)) {
 			delete meta;
 			return NULL;
@@ -64,10 +63,9 @@ void NodeMetaRef::reportMetadataChange(NodeMetaRef *ref)
 	ref->m_env->getMap().dispatchEvent(&event);
 	// Set the block to be saved
 	MapBlock *block = ref->m_env->getMap().getBlockNoCreateNoEx(blockpos);
-	if (block) {
+	if(block)
 		block->raiseModified(MOD_STATE_WRITE_NEEDED,
-			MOD_REASON_REPORT_META_CHANGE);
-	}
+				"NodeMetaRef::reportMetadataChange");
 }
 
 // Exported functions
@@ -82,8 +80,6 @@ int NodeMetaRef::gc_object(lua_State *L) {
 // get_string(self, name)
 int NodeMetaRef::l_get_string(lua_State *L)
 {
-	MAP_LOCK_REQUIRED;
-
 	NodeMetaRef *ref = checkobject(L, 1);
 	std::string name = luaL_checkstring(L, 2);
 
@@ -100,8 +96,6 @@ int NodeMetaRef::l_get_string(lua_State *L)
 // set_string(self, name, var)
 int NodeMetaRef::l_set_string(lua_State *L)
 {
-	MAP_LOCK_REQUIRED;
-
 	NodeMetaRef *ref = checkobject(L, 1);
 	std::string name = luaL_checkstring(L, 2);
 	size_t len = 0;
@@ -119,8 +113,6 @@ int NodeMetaRef::l_set_string(lua_State *L)
 // get_int(self, name)
 int NodeMetaRef::l_get_int(lua_State *L)
 {
-	MAP_LOCK_REQUIRED;
-
 	NodeMetaRef *ref = checkobject(L, 1);
 	std::string name = lua_tostring(L, 2);
 
@@ -137,8 +129,6 @@ int NodeMetaRef::l_get_int(lua_State *L)
 // set_int(self, name, var)
 int NodeMetaRef::l_set_int(lua_State *L)
 {
-	MAP_LOCK_REQUIRED;
-
 	NodeMetaRef *ref = checkobject(L, 1);
 	std::string name = lua_tostring(L, 2);
 	int a = lua_tointeger(L, 3);
@@ -155,8 +145,6 @@ int NodeMetaRef::l_set_int(lua_State *L)
 // get_float(self, name)
 int NodeMetaRef::l_get_float(lua_State *L)
 {
-	MAP_LOCK_REQUIRED;
-
 	NodeMetaRef *ref = checkobject(L, 1);
 	std::string name = lua_tostring(L, 2);
 
@@ -173,8 +161,6 @@ int NodeMetaRef::l_get_float(lua_State *L)
 // set_float(self, name, var)
 int NodeMetaRef::l_set_float(lua_State *L)
 {
-	MAP_LOCK_REQUIRED;
-
 	NodeMetaRef *ref = checkobject(L, 1);
 	std::string name = lua_tostring(L, 2);
 	float a = lua_tonumber(L, 3);
@@ -191,8 +177,6 @@ int NodeMetaRef::l_set_float(lua_State *L)
 // get_inventory(self)
 int NodeMetaRef::l_get_inventory(lua_State *L)
 {
-	MAP_LOCK_REQUIRED;
-
 	NodeMetaRef *ref = checkobject(L, 1);
 	getmeta(ref, true);  // try to ensure the metadata exists
 	InvRef::createNodeMeta(L, ref->m_p);
@@ -202,39 +186,35 @@ int NodeMetaRef::l_get_inventory(lua_State *L)
 // to_table(self)
 int NodeMetaRef::l_to_table(lua_State *L)
 {
-	MAP_LOCK_REQUIRED;
-
 	NodeMetaRef *ref = checkobject(L, 1);
 
 	NodeMetadata *meta = getmeta(ref, true);
-	if (meta == NULL) {
+	if(meta == NULL){
 		lua_pushnil(L);
 		return 1;
 	}
 	lua_newtable(L);
-
 	// fields
 	lua_newtable(L);
 	{
-		StringMap fields = meta->getStrings();
-		for (StringMap::const_iterator
-				it = fields.begin(); it != fields.end(); ++it) {
-			const std::string &name = it->first;
-			const std::string &value = it->second;
+		std::map<std::string, std::string> fields = meta->getStrings();
+		for(std::map<std::string, std::string>::const_iterator
+				i = fields.begin(); i != fields.end(); i++){
+			const std::string &name = i->first;
+			const std::string &value = i->second;
 			lua_pushlstring(L, name.c_str(), name.size());
 			lua_pushlstring(L, value.c_str(), value.size());
 			lua_settable(L, -3);
 		}
 	}
 	lua_setfield(L, -2, "fields");
-
 	// inventory
 	lua_newtable(L);
 	Inventory *inv = meta->getInventory();
-	if (inv) {
-		std::vector<const InventoryList *> lists = inv->getLists();
-		for(std::vector<const InventoryList *>::const_iterator
-				i = lists.begin(); i != lists.end(); i++) {
+	if(inv){
+		std::vector<const InventoryList*> lists = inv->getLists();
+		for(std::vector<const InventoryList*>::const_iterator
+				i = lists.begin(); i != lists.end(); i++){
 			push_inventory_list(L, inv, (*i)->getName().c_str());
 			lua_setfield(L, -2, (*i)->getName().c_str());
 		}
@@ -246,8 +226,6 @@ int NodeMetaRef::l_to_table(lua_State *L)
 // from_table(self, table)
 int NodeMetaRef::l_from_table(lua_State *L)
 {
-	MAP_LOCK_REQUIRED;
-
 	NodeMetaRef *ref = checkobject(L, 1);
 	int base = 2;
 

@@ -126,7 +126,7 @@ ItemStack::ItemStack(std::string name_, u16 count_,
 
 void ItemStack::serialize(std::ostream &os) const
 {
-	DSTACK(FUNCTION_NAME);
+	DSTACK(__FUNCTION_NAME);
 
 	if(empty())
 		return;
@@ -151,7 +151,7 @@ void ItemStack::serialize(std::ostream &os) const
 
 void ItemStack::deSerialize(std::istream &is, IItemDefManager *itemdef)
 {
-	DSTACK(FUNCTION_NAME);
+	DSTACK(__FUNCTION_NAME);
 
 	clear();
 
@@ -163,7 +163,7 @@ void ItemStack::deSerialize(std::istream &is, IItemDefManager *itemdef)
 	std::getline(is, tmp, ' ');
 	if(!tmp.empty())
 		throw SerializationError("Unexpected text after item name");
-
+	
 	if(name == "MaterialItem")
 	{
 		// Obsoleted on 2011-07-30
@@ -478,7 +478,7 @@ void InventoryList::setName(const std::string &name)
 void InventoryList::serialize(std::ostream &os) const
 {
 	//os.imbue(std::locale("C"));
-
+	
 	os<<"Width "<<m_width<<"\n";
 
 	for(u32 i=0; i<m_items.size(); i++)
@@ -620,13 +620,13 @@ u32 InventoryList::getFreeSlots() const
 
 const ItemStack& InventoryList::getItem(u32 i) const
 {
-	assert(i < m_size); // Pre-condition
+	assert(i < m_size);
 	return m_items[i];
 }
 
 ItemStack& InventoryList::getItem(u32 i)
 {
-	assert(i < m_size); // Pre-condition
+	assert(i < m_size);
 	return m_items[i];
 }
 
@@ -643,7 +643,7 @@ ItemStack InventoryList::changeItem(u32 i, const ItemStack &newitem)
 
 void InventoryList::deleteItem(u32 i)
 {
-	assert(i < m_items.size()); // Pre-condition
+	assert(i < m_items.size());
 	m_items[i].clear();
 }
 
@@ -653,7 +653,7 @@ ItemStack InventoryList::addItem(const ItemStack &newitem_)
 
 	if(newitem.empty())
 		return newitem;
-
+	
 	/*
 		First try to find if it could be added to some existing items
 	*/
@@ -730,7 +730,7 @@ bool InventoryList::containsItem(const ItemStack &item) const
 		return true;
 	for(std::vector<ItemStack>::const_reverse_iterator
 			i = m_items.rbegin();
-			i != m_items.rend(); ++i)
+			i != m_items.rend(); i++)
 	{
 		if(count == 0)
 			break;
@@ -750,7 +750,7 @@ ItemStack InventoryList::removeItem(const ItemStack &item)
 	ItemStack removed;
 	for(std::vector<ItemStack>::reverse_iterator
 			i = m_items.rbegin();
-			i != m_items.rend(); ++i)
+			i != m_items.rend(); i++)
 	{
 		if(i->name == item.name)
 		{
@@ -782,46 +782,10 @@ ItemStack InventoryList::peekItem(u32 i, u32 peekcount) const
 	return m_items[i].peekItem(peekcount);
 }
 
-void InventoryList::moveItemSomewhere(u32 i, InventoryList *dest, u32 count)
-{
-	// Take item from source list
-	ItemStack item1;
-	if (count == 0)
-		item1 = changeItem(i, ItemStack());
-	else
-		item1 = takeItem(i, count);
-
-	if (item1.empty())
-		return;
-
-	// Try to add the item to destination list
-	u32 dest_size = dest->getSize();
-	// First try all the non-empty slots
-	for (u32 dest_i = 0; dest_i < dest_size; dest_i++) {
-		if (!m_items[dest_i].empty()) {
-			item1 = dest->addItem(dest_i, item1);
-			if (item1.empty()) return;
-		}
-	}
-
-	// Then try all the empty ones
-	for (u32 dest_i = 0; dest_i < dest_size; dest_i++) {
-		if (m_items[dest_i].empty()) {
-			item1 = dest->addItem(dest_i, item1);
-			if (item1.empty()) return;
-		}
-	}
-
-	// If we reach this, the item was not fully added
-	// Add the remaining part back to the source item
-	addItem(i, item1);
-}
-
-u32 InventoryList::moveItem(u32 i, InventoryList *dest, u32 dest_i,
-		u32 count, bool swap_if_needed, bool *did_swap)
+void InventoryList::moveItem(u32 i, InventoryList *dest, u32 dest_i, u32 count)
 {
 	if(this == dest && i == dest_i)
-		return count;
+		return;
 
 	// Take item from source list
 	ItemStack item1;
@@ -831,7 +795,7 @@ u32 InventoryList::moveItem(u32 i, InventoryList *dest, u32 dest_i,
 		item1 = takeItem(i, count);
 
 	if(item1.empty())
-		return 0;
+		return;
 
 	// Try to add the item to destination list
 	u32 oldcount = item1.count;
@@ -849,11 +813,8 @@ u32 InventoryList::moveItem(u32 i, InventoryList *dest, u32 dest_i,
 
 		// If olditem is returned, nothing was added.
 		// Swap the items
-		if (nothing_added && swap_if_needed) {
-			// Tell that we swapped
-			if (did_swap != NULL) {
-				*did_swap = true;
-			}
+		if(nothing_added)
+		{
 			// Take item from source list
 			item1 = changeItem(i, ItemStack());
 			// Adding was not possible, swap the items.
@@ -862,7 +823,6 @@ u32 InventoryList::moveItem(u32 i, InventoryList *dest, u32 dest_i,
 			changeItem(i, item2);
 		}
 	}
-	return (oldcount - item1.count);
 }
 
 /*

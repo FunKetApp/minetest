@@ -32,6 +32,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "debug.h"
 #include "settings.h"
 #include "log.h"
+#include "main.h" // for g_settings
 
 #ifdef _WIN32
 	#ifndef WIN32_LEAN_AND_MEAN
@@ -44,9 +45,11 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 	#include <windows.h>
 	#include <winsock2.h>
 	#include <ws2tcpip.h>
-	#define LAST_SOCKET_ERR() WSAGetLastError()
-	typedef SOCKET socket_t;
-	typedef int socklen_t;
+	#ifdef _MSC_VER
+		#pragma comment(lib, "ws2_32.lib")
+	#endif
+typedef SOCKET socket_t;
+typedef int socklen_t;
 #else
 	#include <sys/types.h>
 	#include <sys/socket.h>
@@ -55,8 +58,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 	#include <netdb.h>
 	#include <unistd.h>
 	#include <arpa/inet.h>
-	#define LAST_SOCKET_ERR() (errno)
-	typedef int socket_t;
+typedef int socket_t;
 #endif
 
 // Set to true to enable verbose debug output
@@ -153,7 +155,7 @@ void Address::Resolve(const char *name)
 
 	struct addrinfo *resolved, hints;
 	memset(&hints, 0, sizeof(hints));
-
+	
 	// Setup hints
 	hints.ai_socktype = 0;
 	hints.ai_protocol = 0;
@@ -167,7 +169,7 @@ void Address::Resolve(const char *name)
 	{
 		hints.ai_family = AF_INET;
 	}
-
+	
 	// Do getaddrinfo()
 	int e = getaddrinfo(name, NULL, &hints, &resolved);
 	if(e != 0)
@@ -341,8 +343,7 @@ bool UDPSocket::init(bool ipv6, bool noExceptions)
 		if (noExceptions) {
 			return false;
 		} else {
-			throw SocketException(std::string("Failed to create socket: error ")
-				+ itos(LAST_SOCKET_ERR()));
+			throw SocketException("Failed to create socket");
 		}
 	}
 
@@ -514,7 +515,7 @@ int UDPSocket::Receive(Address & sender, void *data, int size)
 		dstream << (int) m_handle << " <- ";
 		sender.print(&dstream);
 		dstream << ", size=" << received;
-
+		
 		// Print packet contents
 		dstream << ", data=";
 		for(int i = 0; i < received && i < 20; i++) {
@@ -525,7 +526,7 @@ int UDPSocket::Receive(Address & sender, void *data, int size)
 		}
 		if(received > 20)
 			dstream << "...";
-
+		
 		dstream << std::endl;
 	}
 
@@ -574,8 +575,9 @@ bool UDPSocket::WaitData(int timeout_ms)
 		int e = WSAGetLastError();
 		dstream << (int) m_handle << ": WSAGetLastError()="
 		        << e << std::endl;
-		if (e == 10004 /* WSAEINTR */ || e == 10009 /* WSAEBADF */) {
-			infostream << "Ignoring WSAEINTR/WSAEBADF." << std::endl;
+		if(e == 10004 /* = WSAEINTR */ || e == 10009 /*WSAEBADF*/)
+		{
+			dstream << "WARNING: Ignoring WSAEINTR/WSAEBADF." << std::endl;
 			return false;
 		}
 #endif
@@ -585,7 +587,7 @@ bool UDPSocket::WaitData(int timeout_ms)
 		// No data
 		return false;
 	}
-
+	
 	// There is data
 	return true;
 }

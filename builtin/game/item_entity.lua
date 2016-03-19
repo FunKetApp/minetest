@@ -4,14 +4,11 @@ function core.spawn_item(pos, item)
 	-- Take item in any format
 	local stack = ItemStack(item)
 	local obj = core.add_entity(pos, "__builtin:item")
-	-- Don't use obj if it couldn't be added to the map.
-	if obj then
-		obj:get_luaentity():set_item(stack:to_string())
-	end
+	obj:get_luaentity():set_item(stack:to_string())
 	return obj
 end
 
--- If item_entity_ttl is not set, enity will have default life time
+-- If item_entity_ttl is not set, enity will have default life time 
 -- Setting it to -1 disables the feature
 
 local time_to_live = tonumber(core.setting_get("item_entity_ttl"))
@@ -31,7 +28,6 @@ core.register_entity(":__builtin:item", {
 		spritediv = {x = 1, y = 1},
 		initial_sprite_basepos = {x = 0, y = 0},
 		is_visible = false,
-		infotext = "",
 	},
 
 	itemstring = '',
@@ -51,7 +47,6 @@ core.register_entity(":__builtin:item", {
 		local c = s
 		local itemtable = stack:to_table()
 		local itemname = nil
-		local description = ""
 		if itemtable then
 			itemname = stack:to_table().name
 		end
@@ -60,7 +55,6 @@ core.register_entity(":__builtin:item", {
 		if core.registered_items[itemname] then
 			item_texture = core.registered_items[itemname].inventory_image
 			item_type = core.registered_items[itemname].type
-			description = core.registered_items[itemname].description
 		end
 		local prop = {
 			is_visible = true,
@@ -69,7 +63,6 @@ core.register_entity(":__builtin:item", {
 			visual_size = {x = s, y = s},
 			collisionbox = {-c, -c, -c, c, c, c},
 			automatic_rotate = math.pi * 0.5,
-			infotext = description,
 		}
 		self.object:set_properties(prop)
 	end,
@@ -78,8 +71,7 @@ core.register_entity(":__builtin:item", {
 		return core.serialize({
 			itemstring = self.itemstring,
 			always_collect = self.always_collect,
-			age = self.age,
-			dropped_by = self.dropped_by
+			age = self.age
 		})
 	end,
 
@@ -89,12 +81,11 @@ core.register_entity(":__builtin:item", {
 			if data and type(data) == "table" then
 				self.itemstring = data.itemstring
 				self.always_collect = data.always_collect
-				if data.age then
+				if data.age then 
 					self.age = data.age + dtime_s
 				else
 					self.age = dtime_s
 				end
-				self.dropped_by = data.dropped_by
 			end
 		else
 			self.itemstring = staticdata
@@ -103,56 +94,6 @@ core.register_entity(":__builtin:item", {
 		self.object:setvelocity({x = 0, y = 2, z = 0})
 		self.object:setacceleration({x = 0, y = -10, z = 0})
 		self:set_item(self.itemstring)
-	end,
-
-	try_merge_with = function(self, own_stack, object, obj)
-		local stack = ItemStack(obj.itemstring)
-		if own_stack:get_name() == stack:get_name() and stack:get_free_space() > 0 then
-			local overflow = false
-			local count = stack:get_count() + own_stack:get_count()
-			local max_count = stack:get_stack_max()
-			if count > max_count then
-				overflow = true
-				count = count - max_count
-			else
-				self.itemstring = ''
-			end
-			local pos = object:getpos()
-			pos.y = pos.y + (count - stack:get_count()) / max_count * 0.15
-			object:moveto(pos, false)
-			local s, c
-			local max_count = stack:get_stack_max()
-			local name = stack:get_name()
-			if not overflow then
-				obj.itemstring = name .. " " .. count
-				s = 0.2 + 0.1 * (count / max_count)
-				c = s
-				object:set_properties({
-					visual_size = {x = s, y = s},
-					collisionbox = {-c, -c, -c, c, c, c}
-				})
-				self.object:remove()
-				-- merging succeeded
-				return true
-			else
-				s = 0.4
-				c = 0.3
-				object:set_properties({
-					visual_size = {x = s, y = s},
-					collisionbox = {-c, -c, -c, c, c, c}
-				})
-				obj.itemstring = name .. " " .. max_count
-				s = 0.2 + 0.1 * (count / max_count)
-				c = s
-				self.object:set_properties({
-					visual_size = {x = s, y = s},
-					collisionbox = {-c, -c, -c, c, c, c}
-				})
-				self.itemstring = name .. " " .. count
-			end
-		end
-		-- merging didn't succeed
-		return false
 	end,
 
 	on_step = function(self, dtime)
@@ -164,29 +105,58 @@ core.register_entity(":__builtin:item", {
 		end
 		local p = self.object:getpos()
 		p.y = p.y - 0.5
-		local node = core.get_node_or_nil(p)
-		local in_unloaded = (node == nil)
-		if in_unloaded then
-			-- Don't infinetly fall into unloaded map
-			self.object:setvelocity({x = 0, y = 0, z = 0})
-			self.object:setacceleration({x = 0, y = 0, z = 0})
-			self.physical_state = false
-			self.object:set_properties({physical = false})
-			return
-		end
-		local nn = node.name
+		local nn = core.get_node(p).name
 		-- If node is not registered or node is walkably solid and resting on nodebox
 		local v = self.object:getvelocity()
 		if not core.registered_nodes[nn] or core.registered_nodes[nn].walkable and v.y == 0 then
 			if self.physical_state then
 				local own_stack = ItemStack(self.object:get_luaentity().itemstring)
-				-- Merge with close entities of the same item
-				for _, object in ipairs(core.get_objects_inside_radius(p, 0.8)) do
+				for _,object in ipairs(core.get_objects_inside_radius(p, 0.8)) do
 					local obj = object:get_luaentity()
-					if obj and obj.name == "__builtin:item"
-							and obj.physical_state == false then
-						if self:try_merge_with(own_stack, object, obj) then
-							return
+					if obj and obj.name == "__builtin:item" and obj.physical_state == false then
+						local stack = ItemStack(obj.itemstring)
+						if own_stack:get_name() == stack:get_name() and stack:get_free_space() > 0 then 
+							local overflow = false
+							local count = stack:get_count() + own_stack:get_count()
+							local max_count = stack:get_stack_max()
+							if count>max_count then
+								overflow = true
+								count = count - max_count
+							else
+								self.itemstring = ''
+							end	
+							local pos=object:getpos() 
+							pos.y = pos.y + (count - stack:get_count()) / max_count * 0.15
+							object:moveto(pos, false)
+							local s, c
+							local max_count = stack:get_stack_max()
+							local name = stack:get_name()
+							if not overflow then
+								obj.itemstring = name.." "..count
+								s = 0.2 + 0.1 * (count / max_count)
+								c = s
+								object:set_properties({
+									visual_size = {x = s, y = s},
+									collisionbox = {-c, -c, -c, c, c, c}
+								})
+								self.object:remove()
+								return
+							else
+								s = 0.4
+								c = 0.3
+								object:set_properties({
+									visual_size = {x = s, y = s},
+									collisionbox = {-c, -c, -c, c, c, c}
+								})
+								obj.itemstring = name.." "..max_count
+								s = 0.2 + 0.1 * (count / max_count)
+								c = s
+								self.object:set_properties({
+									visual_size = {x = s, y = s},
+									collisionbox = {-c, -c, -c, c, c, c}
+								})
+								self.itemstring = name.." "..count
+							end
 						end
 					end
 				end
@@ -206,10 +176,9 @@ core.register_entity(":__builtin:item", {
 	end,
 
 	on_punch = function(self, hitter)
-		local inv = hitter:get_inventory()
-		if inv and self.itemstring ~= '' then
-			local left = inv:add_item("main", self.itemstring)
-			if left and not left:is_empty() then
+		if self.itemstring ~= '' then
+			local left = hitter:get_inventory():add_item("main", self.itemstring)
+			if not left:is_empty() then
 				self.itemstring = left:to_string()
 				return
 			end

@@ -2,7 +2,7 @@
 #   Do not add CGUITTFont.cpp to the line below.
 #   xCGUITTFont.cpp is a wrapper file that includes
 #   additional required headers.
-add_library(cguittfont STATIC xCGUITTFont.cpp)
+add_library(cguittfont xCGUITTFont.cpp)
 
 if(FREETYPE_PKGCONFIG_FOUND)
 	set_target_properties(cguittfont
@@ -27,4 +27,3 @@ target_link_libraries(
 	${FREETYPE_LIBRARY}
 	${ZLIB_LIBRARIES}  # needed by freetype, repeated here for safety
 	)
-

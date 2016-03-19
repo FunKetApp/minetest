@@ -21,12 +21,11 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define MAPBLOCK_MESH_HEADER
 
 #include "irrlichttypes_extrabloated.h"
-#include "client/tile.h"
+#include "tile.h"
 #include "voxel.h"
 #include <map>
 
 class IGameDef;
-class IShaderSource;
 
 /*
 	Mesh making stuff
@@ -34,22 +33,20 @@ class IShaderSource;
 
 
 class MapBlock;
-struct MinimapMapblock;
 
 struct MeshMakeData
 {
 	VoxelManipulator m_vmanip;
 	v3s16 m_blockpos;
 	v3s16 m_crack_pos_relative;
+	v3s16 m_highlighted_pos_relative;
 	bool m_smooth_lighting;
 	bool m_show_hud;
+	video::SColor m_highlight_mesh_color;
 
 	IGameDef *m_gamedef;
-	bool m_use_shaders;
-	bool m_use_tangent_vertices;
 
-	MeshMakeData(IGameDef *gamedef, bool use_shaders,
-			bool use_tangent_vertices = false);
+	MeshMakeData(IGameDef *gamedef);
 
 	/*
 		Copy central data directly from block, and other data from
@@ -67,6 +64,11 @@ struct MeshMakeData
 	*/
 	void setCrack(int crack_level, v3s16 crack_pos);
 
+	/*
+		Set the highlighted node position
+	*/
+
+	void setHighlighted(v3s16 highlighted_pos, bool show_hud);
 	/*
 		Enable or disable smooth lighting
 	*/
@@ -99,16 +101,9 @@ public:
 	// Returns true if anything has been changed.
 	bool animate(bool faraway, float time, int crack, u32 daynight_ratio);
 
-	scene::IMesh *getMesh()
+	scene::SMesh* getMesh()
 	{
 		return m_mesh;
-	}
-
-	MinimapMapblock *moveMinimapMapblock()
-	{
-		MinimapMapblock *p = m_minimap_mapblock;
-		m_minimap_mapblock = NULL;
-		return p;
 	}
 
 	bool isAnimationForced() const
@@ -125,17 +120,14 @@ public:
 	void updateCameraOffset(v3s16 camera_offset);
 
 private:
-	scene::IMesh *m_mesh;
-	MinimapMapblock *m_minimap_mapblock;
+	scene::SMesh *m_mesh;
 	IGameDef *m_gamedef;
-	video::IVideoDriver *m_driver;
-	ITextureSource *m_tsrc;
-	IShaderSource *m_shdrsrc;
 
 	bool m_enable_shaders;
-	bool m_use_tangent_vertices;
-	bool m_enable_vbo;
+	bool m_enable_highlighting;
 
+	video::SColor m_highlight_mesh_color;
+	
 	// Must animate() be called before rendering?
 	bool m_has_animation;
 	int m_animation_force_timer;
@@ -145,6 +137,7 @@ private:
 	int m_last_crack;
 	// Maps mesh buffer (i.e. material) indices to base texture names
 	std::map<u32, std::string> m_crack_materials;
+	std::list<u32> m_highlighted_materials;
 
 	// Animation info: texture animationi
 	// Maps meshbuffers to TileSpecs
@@ -172,18 +165,11 @@ struct PreMeshBuffer
 	TileSpec tile;
 	std::vector<u16> indices;
 	std::vector<video::S3DVertex> vertices;
-	std::vector<video::S3DVertexTangents> tangent_vertices;
 };
 
 struct MeshCollector
 {
 	std::vector<PreMeshBuffer> prebuffers;
-	bool m_use_tangent_vertices;
-
-	MeshCollector(bool use_tangent_vertices):
-		m_use_tangent_vertices(use_tangent_vertices)
-	{
-	}
 
 	void append(const TileSpec &material,
 			const video::S3DVertex *vertices, u32 numVertices,

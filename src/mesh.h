@@ -49,12 +49,6 @@ void translateMesh(scene::IMesh *mesh, v3f vec);
 void setMeshColor(scene::IMesh *mesh, const video::SColor &color);
 
 /*
-	Shade mesh faces according to their normals
-*/
-
-void shadeMeshFaces(scene::IMesh *mesh);
-
-/*
 	Set the color of all vertices in the mesh.
 	For each vertex, determine the largest absolute entry in
 	the normal vector, and choose one of colorX, colorY or
@@ -83,13 +77,9 @@ void rotateMeshYZby (scene::IMesh *mesh, f64 degrees);
 scene::IMesh* cloneMesh(scene::IMesh *src_mesh);
 
 /*
-	Convert nodeboxes to mesh.
-	boxes - set of nodeboxes to be converted into cuboids
-	uv_coords[24] - table of texture uv coords for each cuboid face
-	expand - factor by which cuboids will be resized
+	Convert nodebox drawtype node to mesh.
 */
-scene::IMesh* convertNodeboxesToMesh(const std::vector<aabb3f> &boxes,
-		const f32 *uv_coords = NULL, float expand = 0);
+scene::IMesh* convertNodeboxNodeToMesh(ContentFeatures *f);
 
 /*
 	Update bounding box for a mesh.

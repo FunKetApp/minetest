@@ -31,9 +31,6 @@ class ISoundManager;
 class IShaderSource;
 class MtEventManager;
 class IRollbackManager;
-class EmergeManager;
-class Camera;
-
 namespace irr { namespace scene {
 	class IAnimatedMesh;
 	class ISceneManager;
@@ -58,10 +55,10 @@ public:
 	virtual ITextureSource* getTextureSource()=0;
 
 	virtual IShaderSource* getShaderSource()=0;
-
+	
 	// Used for keeping track of names/ids of unknown nodes
 	virtual u16 allocateUnknownNodeId(const std::string &name)=0;
-
+	
 	// Only usable on the client
 	virtual ISoundManager* getSoundManager()=0;
 	virtual MtEventManager* getEventManager()=0;
@@ -69,31 +66,23 @@ public:
 	{ return NULL; }
 	virtual scene::ISceneManager* getSceneManager()=0;
 
-	virtual Camera* getCamera()
-	{ return NULL; }
-	virtual void setCamera(Camera *camera) {}
-
 	// Only usable on the server, and NOT thread-safe. It is usable from the
 	// environment thread.
 	virtual IRollbackManager* getRollbackManager(){return NULL;}
-
-	// Only usable on the server. Thread safe if not written while running threads.
-	virtual EmergeManager *getEmergeManager() { return NULL; }
-
+	
 	// Used on the client
 	virtual bool checkLocalPrivilege(const std::string &priv)
 	{ return false; }
-
+	
 	// Shorthands
-	IItemDefManager  *idef()     { return getItemDefManager(); }
-	INodeDefManager  *ndef()     { return getNodeDefManager(); }
-	ICraftDefManager *cdef()     { return getCraftDefManager(); }
-	ITextureSource   *tsrc()     { return getTextureSource(); }
-	ISoundManager    *sound()    { return getSoundManager(); }
-	IShaderSource    *shsrc()    { return getShaderSource(); }
-	MtEventManager   *event()    { return getEventManager(); }
-	IRollbackManager *rollback() { return getRollbackManager();}
-	EmergeManager    *emerge()   { return getEmergeManager(); }
+	IItemDefManager* idef(){return getItemDefManager();}
+	INodeDefManager* ndef(){return getNodeDefManager();}
+	ICraftDefManager* cdef(){return getCraftDefManager();}
+	ITextureSource* tsrc(){return getTextureSource();}
+	ISoundManager* sound(){return getSoundManager();}
+	IShaderSource* shsrc(){return getShaderSource();}
+	MtEventManager* event(){return getEventManager();}
+	IRollbackManager* rollback(){return getRollbackManager();}
 };
 
 #endif

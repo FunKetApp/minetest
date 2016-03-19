@@ -20,6 +20,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "irrlichttypes_extrabloated.h"
 #include "mapnode.h"
 #include "porting.h"
+#include "main.h" // For g_settings
 #include "nodedef.h"
 #include "content_mapnode.h" // For mapnode_translate_*_internal
 #include "serialization.h" // For ser_ver_supported
@@ -70,23 +71,7 @@ void MapNode::setLight(enum LightBank bank, u8 a_light, INodeDefManager *nodemgr
 		param1 |= (a_light & 0x0f)<<4;
 	}
 	else
-		assert("Invalid light bank" == NULL);
-}
-
-bool MapNode::isLightDayNightEq(INodeDefManager *nodemgr) const
-{
-	const ContentFeatures &f = nodemgr->get(*this);
-	bool isEqual;
-
-	if (f.param_type == CPT_LIGHT) {
-		u8 day   = MYMAX(f.light_source, param1 & 0x0f);
-		u8 night = MYMAX(f.light_source, (param1 >> 4) & 0x0f);
-		isEqual = day == night;
-	} else {
-		isEqual = true;
-	}
-
-	return isEqual;
+		assert(0);
 }
 
 u8 MapNode::getLight(enum LightBank bank, INodeDefManager *nodemgr) const
@@ -103,7 +88,7 @@ u8 MapNode::getLight(enum LightBank bank, INodeDefManager *nodemgr) const
 	return MYMAX(f.light_source, light);
 }
 
-u8 MapNode::getLightNoChecks(enum LightBank bank, const ContentFeatures *f) const
+u8 MapNode::getLightNoChecks(enum LightBank bank, const ContentFeatures *f)
 {
 	return MYMAX(f->light_source,
 	             bank == LIGHTBANK_DAY ? param1 & 0x0f : (param1 >> 4) & 0x0f);
@@ -134,7 +119,7 @@ u8 MapNode::getFaceDir(INodeDefManager *nodemgr) const
 {
 	const ContentFeatures &f = nodemgr->get(*this);
 	if(f.param_type_2 == CPT2_FACEDIR)
-		return (getParam2() & 0x1F) % 24;
+		return getParam2() & 0x1F;
 	return 0;
 }
 
@@ -159,74 +144,37 @@ v3s16 MapNode::getWallMountedDir(INodeDefManager *nodemgr) const
 	}
 }
 
-void MapNode::rotateAlongYAxis(INodeDefManager *nodemgr, Rotation rot)
-{
+void MapNode::rotateAlongYAxis(INodeDefManager *nodemgr, Rotation rot) {
 	ContentParamType2 cpt2 = nodemgr->get(*this).param_type_2;
 
 	if (cpt2 == CPT2_FACEDIR) {
-		static const u8 rotate_facedir[24 * 4] = {
-			// Table value = rotated facedir
-			// Columns: 0, 90, 180, 270 degrees rotation around vertical axis
-			// Rotation is anticlockwise as seen from above (+Y)
-
-			0, 1, 2, 3,  // Initial facedir 0 to 3
-			1, 2, 3, 0,
-			2, 3, 0, 1,
-			3, 0, 1, 2,
-
-			4, 13, 10, 19,  // 4 to 7
-			5, 14, 11, 16,
-			6, 15, 8, 17,
-			7, 12, 9, 18,
-
-			8, 17, 6, 15,  // 8 to 11
-			9, 18, 7, 12,
-			10, 19, 4, 13,
-			11, 16, 5, 14,
-
-			12, 9, 18, 7,  // 12 to 15
-			13, 10, 19, 4,
-			14, 11, 16, 5,
-			15, 8, 17, 6,
-
-			16, 5, 14, 11,  // 16 to 19
-			17, 6, 15, 8,
-			18, 7, 12, 9,
-			19, 4, 13, 10,
-
-			20, 23, 22, 21,  // 20 to 23
-			21, 20, 23, 22,
-			22, 21, 20, 23,
-			23, 22, 21, 20
-		};
-		u8 facedir = (param2 & 31) % 24;
-		u8 index = facedir * 4 + rot;
-		param2 &= ~31;
-		param2 |= rotate_facedir[index];
+		u8 newrot = param2 & 3;
+		param2 &= ~3;
+		param2 |= (newrot + rot) & 3;
 	} else if (cpt2 == CPT2_WALLMOUNTED) {
 		u8 wmountface = (param2 & 7);
 		if (wmountface <= 1)
 			return;
-
+			
 		Rotation oldrot = wallmounted_to_rot[wmountface - 2];
 		param2 &= ~7;
 		param2 |= rot_to_wallmounted[(oldrot - rot) & 3];
 	}
 }
 
-void transformNodeBox(const MapNode &n, const NodeBox &nodebox,
-		INodeDefManager *nodemgr, std::vector<aabb3f> *p_boxes, u8 neighbors = 0)
+static std::vector<aabb3f> transformNodeBox(const MapNode &n,
+		const NodeBox &nodebox, INodeDefManager *nodemgr)
 {
-	std::vector<aabb3f> &boxes = *p_boxes;
-
-	if (nodebox.type == NODEBOX_FIXED || nodebox.type == NODEBOX_LEVELED) {
+	std::vector<aabb3f> boxes;
+	if(nodebox.type == NODEBOX_FIXED || nodebox.type == NODEBOX_LEVELED)
+	{
 		const std::vector<aabb3f> &fixed = nodebox.fixed;
 		int facedir = n.getFaceDir(nodemgr);
 		u8 axisdir = facedir>>2;
 		facedir&=0x03;
 		for(std::vector<aabb3f>::const_iterator
 				i = fixed.begin();
-				i != fixed.end(); ++i)
+				i != fixed.end(); i++)
 		{
 			aabb3f box = *i;
 
@@ -395,71 +343,32 @@ void transformNodeBox(const MapNode &n, const NodeBox &nodebox,
 			boxes.push_back(box);
 		}
 	}
-	else if (nodebox.type == NODEBOX_CONNECTED)
-	{
-		size_t boxes_size = boxes.size();
-		boxes_size += nodebox.fixed.size();
-		if (neighbors & 1)
-			boxes_size += nodebox.connect_top.size();
-		if (neighbors & 2)
-			boxes_size += nodebox.connect_bottom.size();
-		if (neighbors & 4)
-			boxes_size += nodebox.connect_front.size();
-		if (neighbors & 8)
-			boxes_size += nodebox.connect_left.size();
-		if (neighbors & 16)
-			boxes_size += nodebox.connect_back.size();
-		if (neighbors & 32)
-			boxes_size += nodebox.connect_right.size();
-		boxes.reserve(boxes_size);
-
-#define BOXESPUSHBACK(c) do { \
-		for (std::vector<aabb3f>::const_iterator \
-				it = (c).begin(); \
-				it != (c).end(); ++it) \
-			(boxes).push_back(*it); \
-		} while (0)
-
-		BOXESPUSHBACK(nodebox.fixed);
-
-		if (neighbors & 1)
-			BOXESPUSHBACK(nodebox.connect_top);
-		if (neighbors & 2)
-			BOXESPUSHBACK(nodebox.connect_bottom);
-		if (neighbors & 4)
-			BOXESPUSHBACK(nodebox.connect_front);
-		if (neighbors & 8)
-			BOXESPUSHBACK(nodebox.connect_left);
-		if (neighbors & 16)
-			BOXESPUSHBACK(nodebox.connect_back);
-		if (neighbors & 32)
-			BOXESPUSHBACK(nodebox.connect_right);
-	}
 	else // NODEBOX_REGULAR
 	{
 		boxes.push_back(aabb3f(-BS/2,-BS/2,-BS/2,BS/2,BS/2,BS/2));
 	}
+	return boxes;
 }
 
-void MapNode::getNodeBoxes(INodeDefManager *nodemgr, std::vector<aabb3f> *boxes, u8 neighbors)
+std::vector<aabb3f> MapNode::getNodeBoxes(INodeDefManager *nodemgr) const
 {
 	const ContentFeatures &f = nodemgr->get(*this);
-	transformNodeBox(*this, f.node_box, nodemgr, boxes, neighbors);
+	return transformNodeBox(*this, f.node_box, nodemgr);
 }
 
-void MapNode::getCollisionBoxes(INodeDefManager *nodemgr, std::vector<aabb3f> *boxes, u8 neighbors)
+std::vector<aabb3f> MapNode::getCollisionBoxes(INodeDefManager *nodemgr) const
 {
 	const ContentFeatures &f = nodemgr->get(*this);
 	if (f.collision_box.fixed.empty())
-		transformNodeBox(*this, f.node_box, nodemgr, boxes, neighbors);
+		return transformNodeBox(*this, f.node_box, nodemgr);
 	else
-		transformNodeBox(*this, f.collision_box, nodemgr, boxes, neighbors);
+		return transformNodeBox(*this, f.collision_box, nodemgr);
 }
 
-void MapNode::getSelectionBoxes(INodeDefManager *nodemgr, std::vector<aabb3f> *boxes)
+std::vector<aabb3f> MapNode::getSelectionBoxes(INodeDefManager *nodemgr) const
 {
 	const ContentFeatures &f = nodemgr->get(*this);
-	transformNodeBox(*this, f.selection_box, nodemgr, boxes);
+	return transformNodeBox(*this, f.selection_box, nodemgr);
 }
 
 u8 MapNode::getMaxLevel(INodeDefManager *nodemgr) const
@@ -530,11 +439,28 @@ u8 MapNode::addLevel(INodeDefManager *nodemgr, s8 add)
 	return setLevel(nodemgr, level);
 }
 
+void MapNode::freezeMelt(INodeDefManager *ndef) {
+	u8 level_was_max = this->getMaxLevel(ndef);
+	u8 level_was = this->getLevel(ndef);
+	this->setContent(ndef->getId(ndef->get(*this).freezemelt));
+	u8 level_now_max = this->getMaxLevel(ndef);
+	if (level_was_max && level_was_max != level_now_max) {
+		u8 want = (float)level_now_max / level_was_max * level_was;
+		if (!want)
+			want = 1;
+		if (want != level_was)
+			this->setLevel(ndef, want);
+		//errorstream<<"was="<<(int)level_was<<"/"<<(int)level_was_max<<" nowm="<<(int)want<<"/"<<(int)level_now_max<< " => "<<(int)this->getLevel(ndef)<< std::endl;
+	}
+	if (this->getMaxLevel(ndef) && !this->getLevel(ndef))
+		this->addLevel(ndef);
+}
+
 u32 MapNode::serializedLength(u8 version)
 {
 	if(!ser_ver_supported(version))
 		throw VersionMismatchException("ERROR: MapNode format not supported");
-
+		
 	if(version == 0)
 		return 1;
 	else if(version <= 9)
@@ -548,13 +474,13 @@ void MapNode::serialize(u8 *dest, u8 version)
 {
 	if(!ser_ver_supported(version))
 		throw VersionMismatchException("ERROR: MapNode format not supported");
-
+	
 	// Can't do this anymore; we have 16-bit dynamically allocated node IDs
 	// in memory; conversion just won't work in this direction.
 	if(version < 24)
 		throw SerializationError("MapNode::serialize: serialization to "
 				"version < 24 not possible");
-
+		
 	writeU16(dest+0, param0);
 	writeU8(dest+2, param1);
 	writeU8(dest+3, param2);
@@ -563,7 +489,7 @@ void MapNode::deSerialize(u8 *source, u8 version)
 {
 	if(!ser_ver_supported(version))
 		throw VersionMismatchException("ERROR: MapNode format not supported");
-
+		
 	if(version <= 21)
 	{
 		deSerialize_pre22(source, version);
@@ -591,8 +517,8 @@ void MapNode::serializeBulk(std::ostream &os, int version,
 	if(!ser_ver_supported(version))
 		throw VersionMismatchException("ERROR: MapNode format not supported");
 
-	sanity_check(content_width == 2);
-	sanity_check(params_width == 2);
+	assert(content_width == 2);
+	assert(params_width == 2);
 
 	// Can't do this anymore; we have 16-bit dynamically allocated node IDs
 	// in memory; conversion just won't work in this direction.
@@ -638,10 +564,9 @@ void MapNode::deSerializeBulk(std::istream &is, int version,
 	if(!ser_ver_supported(version))
 		throw VersionMismatchException("ERROR: MapNode format not supported");
 
-	if (version < 22
-			|| (content_width != 1 && content_width != 2)
-			|| params_width != 2)
-		FATAL_ERROR("Deserialize bulk node data error");
+	assert(version >= 22);
+	assert(content_width == 1 || content_width == 2);
+	assert(params_width == 2);
 
 	// Uncompress or read data
 	u32 len = nodecount * (content_width + params_width);
@@ -726,7 +651,7 @@ void MapNode::deSerialize_pre22(u8 *source, u8 version)
 			param2 &= 0x0f;
 		}
 	}
-
+	
 	// Convert special values from old version to new
 	if(version <= 19)
 	{

@@ -22,12 +22,10 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include <map>
 #include "irrlichttypes_extrabloated.h"
+#include "content_object.h"
 #include "clientobject.h"
 #include "object_properties.h"
 #include "itemgroup.h"
-
-class Camera;
-struct Nametag;
 
 /*
 	SmoothTranslator
@@ -63,19 +61,18 @@ private:
 	std::string m_name;
 	bool m_is_player;
 	bool m_is_local_player;
+	int m_id;
 	// Property-ish things
 	ObjectProperties m_prop;
 	//
 	scene::ISceneManager *m_smgr;
 	IrrlichtDevice *m_irr;
-	Camera* m_camera;
-	IGameDef *m_gamedef;
-	aabb3f m_selection_box;
+	core::aabbox3d<f32> m_selection_box;
 	scene::IMeshSceneNode *m_meshnode;
 	scene::IAnimatedMeshSceneNode *m_animated_meshnode;
 	WieldMeshSceneNode *m_wield_meshnode;
 	scene::IBillboardSceneNode *m_spritenode;
-	Nametag* m_nametag;
+	scene::ITextSceneNode* m_textnode;
 	v3f m_position;
 	v3f m_velocity;
 	v3f m_acceleration;
@@ -90,7 +87,6 @@ private:
 	v2s32 m_animation_range;
 	int m_animation_speed;
 	int m_animation_blend;
-	bool m_animation_loop;
 	std::map<std::string, core::vector2d<v3f> > m_bone_position; // stores position and rotation for each bone name
 	std::string m_attachment_bone;
 	v3f m_attachment_position;
@@ -119,7 +115,7 @@ public:
 		return new GenericCAO(gamedef, env);
 	}
 
-	inline ActiveObjectType getType() const
+	inline u8 getType() const
 	{
 		return ACTIVEOBJECT_TYPE_GENERIC;
 	}
@@ -132,7 +128,7 @@ public:
 
 	bool collideWithObjects();
 
-	aabb3f *getSelectionBox();
+	core::aabbox3d<f32>* getSelectionBox();
 
 	v3f getPosition();
 
@@ -166,8 +162,6 @@ public:
 		m_is_visible = toset;
 	}
 
-	void setChildrenVisible(bool toset);
-
 	void setAttachments();
 
 	void removeFromScene(bool permanent);
@@ -181,8 +175,6 @@ public:
 	}
 
 	void updateLight(u8 light_at_pos);
-
-	void updateLightNoCheck(u8 light_at_pos);
 
 	v3s16 getLightPosition();
 
@@ -206,11 +198,6 @@ public:
 			float time_from_last_punch=1000000);
 
 	std::string debugInfoText();
-	
-	std::string infoText()
-	{
-		return m_prop.infotext;
-	}
 };
 
 

@@ -28,14 +28,14 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include <IGUIScrollBar.h>
 #include "debug.h"
 #include "log.h"
-#include "client/tile.h"
+#include "tile.h"
 #include "gettime.h"
 #include "util/string.h"
 #include "util/numeric.h"
 #include "util/string.h" // for parseColorString()
+#include "main.h"
 #include "settings.h" // for settings
 #include "porting.h" // for dpi
-#include "guiscalingfilter.h"
 
 /*
 	GUITable
@@ -556,46 +556,24 @@ s32 GUITable::getSelected() const
 
 void GUITable::setSelected(s32 index)
 {
-	s32 old_selected = m_selected;
-
 	m_selected = -1;
 	m_sel_column = 0;
 	m_sel_doubleclick = false;
 
-	--index; // Switch from 1-based indexing to 0-based indexing
+	--index;
 
 	s32 rowcount = m_rows.size();
-	if (rowcount == 0) {
-		return;
-	} else if (index < 0) {
-		index = 0;
-	} else if (index >= rowcount) {
+
+	if (index >= rowcount)
 		index = rowcount - 1;
-	}
-
-	// If the selected row is not visible, open its ancestors to make it visible
-	bool selection_invisible = m_rows[index].visible_index < 0;
-	if (selection_invisible) {
-		std::set<s32> opened_trees;
-		getOpenedTrees(opened_trees);
-		s32 indent = m_rows[index].indent;
-		for (s32 j = index - 1; j >= 0; --j) {
-			if (m_rows[j].indent < indent) {
-				opened_trees.insert(j);
-				indent = m_rows[j].indent;
-			}
-		}
-		setOpenedTrees(opened_trees);
-	}
-
+	while (index >= 0 && m_rows[index].visible_index < 0)
+		--index;
 	if (index >= 0) {
 		m_selected = m_rows[index].visible_index;
 		assert(m_selected >= 0 && m_selected < (s32) m_visible_rows.size());
 	}
 
-	if (m_selected != old_selected || selection_invisible) {
-		autoScroll();
-	}
+	autoScroll();
 }
 
 GUITable::DynamicData GUITable::getDynamicData() const
@@ -618,11 +596,11 @@ void GUITable::setDynamicData(const DynamicData &dyndata)
 	m_keynav_time = dyndata.keynav_time;
 	m_keynav_buffer = dyndata.keynav_buffer;
 
+	m_scrollbar->setPos(dyndata.scrollpos);
+
 	setSelected(dyndata.selected);
 	m_sel_column = 0;
 	m_sel_doubleclick = false;
-
-	m_scrollbar->setPos(dyndata.scrollpos);
 }
 
 const c8* GUITable::getTypeName() const
@@ -660,11 +638,10 @@ void GUITable::draw()
 	client_clip.UpperLeftCorner.Y += 1;
 	client_clip.UpperLeftCorner.X += 1;
 	client_clip.LowerRightCorner.Y -= 1;
-	client_clip.LowerRightCorner.X -= 1;
-	if (m_scrollbar->isVisible()) {
-		client_clip.LowerRightCorner.X =
-				m_scrollbar->getAbsolutePosition().UpperLeftCorner.X;
-	}
+	client_clip.LowerRightCorner.X -=
+		m_scrollbar->isVisible() ?
+		skin->getSize(gui::EGDS_SCROLLBAR_SIZE) :
+		1;
 	client_clip.clipAgainst(AbsoluteClippingRect);
 
 	// draw visible rows
@@ -928,11 +905,6 @@ bool GUITable::OnEvent(const SEvent &event)
 						sel_doubleclick) {
 					sendTableEvent(sel_column, sel_doubleclick);
 				}
-
-				// Treeview: double click opens/closes trees
-				if (m_has_tree_column && sel_doubleclick) {
-					toggleVisibleTree(m_selected, 0, false);
-				}
 			}
 		}
 		return true;
@@ -956,7 +928,7 @@ s32 GUITable::allocString(const std::string &text)
 	std::map<std::string, s32>::iterator it = m_alloc_strings.find(text);
 	if (it == m_alloc_strings.end()) {
 		s32 id = m_strings.size();
-		std::wstring wtext = utf8_to_wide(text);
+		std::wstring wtext = narrow_to_wide(text);
 		m_strings.push_back(core::stringw(wtext.c_str()));
 		m_alloc_strings.insert(std::make_pair(text, id));
 		return id;
@@ -1118,9 +1090,7 @@ void GUITable::getOpenedTrees(std::set<s32> &opened_trees) const
 
 void GUITable::setOpenedTrees(const std::set<s32> &opened_trees)
 {
-	s32 old_selected = -1;
-	if (m_selected >= 0)
-		old_selected = m_visible_rows[m_selected];
+	s32 old_selected = getSelected();
 
 	std::vector<s32> parents;
 	std::vector<s32> closed_parents;
@@ -1172,9 +1142,7 @@ void GUITable::setOpenedTrees(const std::set<s32> &opened_trees)
 
 	updateScrollBar();
 
-	// m_selected must be updated since it is a visible row index
-	if (old_selected >= 0)
-		m_selected = m_rows[old_selected].visible_index;
+	setSelected(old_selected);
 }
 
 void GUITable::openTree(s32 to_open)

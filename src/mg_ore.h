@@ -20,35 +20,41 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #ifndef MG_ORE_HEADER
 #define MG_ORE_HEADER
 
-#include "objdef.h"
-#include "noise.h"
-#include "nodedef.h"
+#include "util/string.h"
+#include "mapgen.h"
 
+struct NoiseParams;
 class Noise;
 class Mapgen;
-class MMVManip;
+class ManualMapVoxelManipulator;
 
 /////////////////// Ore generation flags
 
-#define OREFLAG_ABSHEIGHT     0x01
-#define OREFLAG_PUFF_CLIFFS   0x02
-#define OREFLAG_PUFF_ADDITIVE 0x04
-#define OREFLAG_USE_NOISE     0x08
+// Use absolute value of height to determine ore placement
+#define OREFLAG_ABSHEIGHT 0x01
+
+// Use 3d noise to get density of ore placement, instead of just the position
+#define OREFLAG_DENSITY   0x02 // not yet implemented
+
+// For claylike ore types, place ore if the number of surrounding
+// nodes isn't the specified node
+#define OREFLAG_NODEISNT  0x04 // not yet implemented
+
+#define OREFLAG_USE_NOISE 0x08
 
 #define ORE_RANGE_ACTUAL 1
 #define ORE_RANGE_MIRROR 2
 
+
 enum OreType {
 	ORE_SCATTER,
 	ORE_SHEET,
-	ORE_PUFF,
-	ORE_BLOB,
-	ORE_VEIN,
+	ORE_CLAYLIKE
 };
 
 extern FlagDesc flagdesc_ore[];
 
-class Ore : public ObjDef, public NodeResolver {
+class Ore : public GenElement {
 public:
 	static const bool NEEDS_NOISE = false;
 
@@ -57,106 +63,54 @@ public:
 	u32 clust_scarcity; // ore cluster has a 1-in-clust_scarcity chance of appearing at a node
 	s16 clust_num_ores; // how many ore nodes are in a chunk
 	s16 clust_size;     // how large (in nodes) a chunk of ore is
-	s16 y_min;
-	s16 y_max;
+	s16 height_min;
+	s16 height_max;
 	u8 ore_param2;		// to set node-specific attributes
 	u32 flags;          // attributes for this ore
-	float nthresh;      // threshold for noise at which an ore is placed
+	float nthresh;      // threshhold for noise at which an ore is placed
 	NoiseParams np;     // noise for distribution of clusters (NULL for uniform scattering)
 	Noise *noise;
-	std::set<u8> biomes;
 
 	Ore();
-	virtual ~Ore();
-
-	virtual void resolveNodeNames();
 
 	size_t placeOre(Mapgen *mg, u32 blockseed, v3s16 nmin, v3s16 nmax);
-	virtual void generate(MMVManip *vm, int mapseed, u32 blockseed,
-		v3s16 nmin, v3s16 nmax, u8 *biomemap) = 0;
+	virtual void generate(ManualMapVoxelManipulator *vm, int seed,
+						u32 blockseed, v3s16 nmin, v3s16 nmax) = 0;
 };
 
 class OreScatter : public Ore {
 public:
 	static const bool NEEDS_NOISE = false;
 
-	virtual void generate(MMVManip *vm, int mapseed, u32 blockseed,
-		v3s16 nmin, v3s16 nmax, u8 *biomemap);
+	virtual void generate(ManualMapVoxelManipulator *vm, int seed,
+						u32 blockseed, v3s16 nmin, v3s16 nmax);
 };
 
 class OreSheet : public Ore {
 public:
 	static const bool NEEDS_NOISE = true;
 
-	u16 column_height_min;
-	u16 column_height_max;
-	float column_midpoint_factor;
-
-	virtual void generate(MMVManip *vm, int mapseed, u32 blockseed,
-		v3s16 nmin, v3s16 nmax, u8 *biomemap);
+	virtual void generate(ManualMapVoxelManipulator *vm, int seed,
+						u32 blockseed, v3s16 nmin, v3s16 nmax);
 };
 
-class OrePuff : public Ore {
+class OreManager : public GenElementManager {
 public:
-	static const bool NEEDS_NOISE = true;
+	static const char *ELEMENT_TITLE;
+	static const size_t ELEMENT_LIMIT = 0x10000;
 
-	NoiseParams np_puff_top;
-	NoiseParams np_puff_bottom;
-	Noise *noise_puff_top;
-	Noise *noise_puff_bottom;
-
-	OrePuff();
-	virtual ~OrePuff();
-
-	virtual void generate(MMVManip *vm, int mapseed, u32 blockseed,
-		v3s16 nmin, v3s16 nmax, u8 *biomemap);
-};
-
-class OreBlob : public Ore {
-public:
-	static const bool NEEDS_NOISE = true;
-
-	virtual void generate(MMVManip *vm, int mapseed, u32 blockseed,
-		v3s16 nmin, v3s16 nmax, u8 *biomemap);
-};
-
-class OreVein : public Ore {
-public:
-	static const bool NEEDS_NOISE = true;
-
-	float random_factor;
-	Noise *noise2;
-
-	OreVein();
-	virtual ~OreVein();
-
-	virtual void generate(MMVManip *vm, int mapseed, u32 blockseed,
-		v3s16 nmin, v3s16 nmax, u8 *biomemap);
-};
-
-class OreManager : public ObjDefManager {
-public:
 	OreManager(IGameDef *gamedef);
-	virtual ~OreManager() {}
+	~OreManager() {}
 
-	const char *getObjectTitle() const
-	{
-		return "ore";
-	}
-
-	static Ore *create(OreType type)
+	Ore *create(int type)
 	{
 		switch (type) {
 		case ORE_SCATTER:
 			return new OreScatter;
 		case ORE_SHEET:
 			return new OreSheet;
-		case ORE_PUFF:
-			return new OrePuff;
-		case ORE_BLOB:
-			return new OreBlob;
-		case ORE_VEIN:
-			return new OreVein;
+		//case ORE_CLAYLIKE: //TODO: implement this!
+		//	return new OreClaylike;
 		default:
 			return NULL;
 		}
@@ -164,7 +118,7 @@ public:
 
 	void clear();
 
-	size_t placeAllOres(Mapgen *mg, u32 blockseed, v3s16 nmin, v3s16 nmax);
+	size_t placeAllOres(Mapgen *mg, u32 seed, v3s16 nmin, v3s16 nmax);
 };
 
 #endif

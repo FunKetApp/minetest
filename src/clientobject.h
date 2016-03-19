@@ -54,9 +54,8 @@ public:
 	virtual void removeFromScene(bool permanent){}
 	// 0 <= light_at_pos <= LIGHT_SUN
 	virtual void updateLight(u8 light_at_pos){}
-	virtual void updateLightNoCheck(u8 light_at_pos){}
 	virtual v3s16 getLightPosition(){return v3s16(0,0,0);}
-	virtual aabb3f *getSelectionBox() { return NULL; }
+	virtual core::aabbox3d<f32>* getSelectionBox(){return NULL;}
 	virtual bool getCollisionBox(aabb3f *toset){return false;}
 	virtual bool collideWithObjects(){return false;}
 	virtual v3f getPosition(){return v3f(0,0,0);}
@@ -87,7 +86,7 @@ public:
 	virtual void initialize(const std::string &data){}
 
 	// Create a certain type of ClientActiveObject
-	static ClientActiveObject* create(ActiveObjectType type, IGameDef *gamedef,
+	static ClientActiveObject* create(u8 type, IGameDef *gamedef,
 			ClientEnvironment *env);
 
 	// If returns true, punch will not be sent to the server

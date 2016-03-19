@@ -67,9 +67,6 @@ local function main_button_handler(this, fields, name, tabdata)
 
 	if fields["srv_worlds"] ~= nil then
 		local event = core.explode_textlist_event(fields["srv_worlds"])
-		local selected = core.get_textlist_index("srv_worlds")
-
-		menu_worldmt_legacy(selected)
 
 		if event.type == "DCL" then
 			world_doubleclick = true
@@ -87,25 +84,16 @@ local function main_button_handler(this, fields, name, tabdata)
 
 	if fields["cb_creative_mode"] then
 		core.setting_set("creative_mode", fields["cb_creative_mode"])
-		local selected = core.get_textlist_index("srv_worlds")
-		menu_worldmt(selected, "creative_mode", fields["cb_creative_mode"])
-
 		return true
 	end
 
 	if fields["cb_enable_damage"] then
 		core.setting_set("enable_damage", fields["cb_enable_damage"])
-		local selected = core.get_textlist_index("srv_worlds")
-		menu_worldmt(selected, "enable_damage", fields["cb_enable_damage"])
-
 		return true
 	end
 
 	if fields["cb_server_announce"] then
 		core.setting_set("server_announce", fields["cb_server_announce"])
-		local selected = core.get_textlist_index("srv_worlds")
-		menu_worldmt(selected, "server_announce", fields["cb_server_announce"])
-
 		return true
 	end
 
@@ -113,12 +101,12 @@ local function main_button_handler(this, fields, name, tabdata)
 		world_doubleclick or
 		fields["key_enter"] then
 		local selected = core.get_textlist_index("srv_worlds")
-		gamedata.selected_world = menudata.worldlist:get_raw_index(selected)
-		if selected ~= nil and gamedata.selected_world ~= 0 then
+		if selected ~= nil then
 			gamedata.playername     = fields["te_playername"]
 			gamedata.password       = fields["te_passwd"]
 			gamedata.port           = fields["te_serverport"]
 			gamedata.address        = ""
+			gamedata.selected_world = menudata.worldlist:get_raw_index(selected)
 
 			core.setting_set("port",gamedata.port)
 			if fields["te_serveraddr"] ~= nil then
@@ -127,17 +115,12 @@ local function main_button_handler(this, fields, name, tabdata)
 
 			--update last game
 			local world = menudata.worldlist:get_raw_element(gamedata.selected_world)
-			if world then
-				local game, index = gamemgr.find_by_gameid(world.gameid)
-				core.setting_set("menu_last_game", game.id)
-			end
 			
+			local game,index = gamemgr.find_by_gameid(world.gameid)
+			core.setting_set("menu_last_game",game.id)
 			core.start()
-		else
-			gamedata.errormessage =
-				fgettext("No world created or selected!")
+			return true
 		end
-		return true
 	end
 
 	if fields["world_create"] ~= nil then

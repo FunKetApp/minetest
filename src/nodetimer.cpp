@@ -45,9 +45,9 @@ void NodeTimer::deSerialize(std::istream &is)
 
 void NodeTimerList::serialize(std::ostream &os, u8 map_format_version) const
 {
-	if (map_format_version == 24) {
+	if(map_format_version == 24){
 		// Version 0 is a placeholder for "nothing to see here; go away."
-		if (m_data.empty()) {
+		if(m_data.empty()){
 			writeU8(os, 0); // version
 			return;
 		}
@@ -55,18 +55,18 @@ void NodeTimerList::serialize(std::ostream &os, u8 map_format_version) const
 		writeU16(os, m_data.size());
 	}
 
-	if (map_format_version >= 25) {
-		writeU8(os, 2 + 4 + 4); // length of the data for a single timer
+	if(map_format_version >= 25){
+		writeU8(os, 2+4+4);
 		writeU16(os, m_data.size());
 	}
 
-	for (std::map<v3s16, NodeTimer>::const_iterator
+	for(std::map<v3s16, NodeTimer>::const_iterator
 			i = m_data.begin();
-			i != m_data.end(); ++i) {
+			i != m_data.end(); i++){
 		v3s16 p = i->first;
 		NodeTimer t = i->second;
 
-		u16 p16 = p.Z * MAP_BLOCKSIZE * MAP_BLOCKSIZE + p.Y * MAP_BLOCKSIZE + p.X;
+		u16 p16 = p.Z*MAP_BLOCKSIZE*MAP_BLOCKSIZE + p.Y*MAP_BLOCKSIZE + p.X;
 		writeU16(os, p16);
 		t.serialize(os);
 	}
@@ -75,7 +75,7 @@ void NodeTimerList::serialize(std::ostream &os, u8 map_format_version) const
 void NodeTimerList::deSerialize(std::istream &is, u8 map_format_version)
 {
 	m_data.clear();
-
+	
 	if(map_format_version == 24){
 		u8 timer_version = readU8(is);
 		if(timer_version == 0)
@@ -108,7 +108,7 @@ void NodeTimerList::deSerialize(std::istream &is, u8 map_format_version)
 
 		if(t.timeout <= 0)
 		{
-			warningstream<<"NodeTimerList::deSerialize(): "
+			infostream<<"WARNING: NodeTimerList::deSerialize(): "
 					<<"invalid data at position"
 					<<"("<<p.X<<","<<p.Y<<","<<p.Z<<"): Ignoring."
 					<<std::endl;
@@ -117,7 +117,7 @@ void NodeTimerList::deSerialize(std::istream &is, u8 map_format_version)
 
 		if(m_data.find(p) != m_data.end())
 		{
-			warningstream<<"NodeTimerList::deSerialize(): "
+			infostream<<"WARNING: NodeTimerList::deSerialize(): "
 					<<"already set data at position"
 					<<"("<<p.X<<","<<p.Y<<","<<p.Z<<"): Ignoring."
 					<<std::endl;
@@ -134,7 +134,7 @@ std::map<v3s16, NodeTimer> NodeTimerList::step(float dtime)
 	// Increment timers
 	for(std::map<v3s16, NodeTimer>::iterator
 			i = m_data.begin();
-			i != m_data.end(); ++i){
+			i != m_data.end(); i++){
 		v3s16 p = i->first;
 		NodeTimer t = i->second;
 		t.elapsed += dtime;
@@ -146,7 +146,7 @@ std::map<v3s16, NodeTimer> NodeTimerList::step(float dtime)
 	// Delete elapsed timers
 	for(std::map<v3s16, NodeTimer>::const_iterator
 			i = elapsed_timers.begin();
-			i != elapsed_timers.end(); ++i){
+			i != elapsed_timers.end(); i++){
 		v3s16 p = i->first;
 		m_data.erase(p);
 	}

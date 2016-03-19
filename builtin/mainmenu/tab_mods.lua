@@ -36,10 +36,7 @@ local function get_formspec(tabview, name, tabdata)
 --		"label[0.8,4.2;" .. fgettext("Add mod:") .. "]" ..
 --		TODO Disabled due to upcoming release 0.4.8 and irrlicht messing up localization
 --		"button[0.75,4.85;1.8,0.5;btn_mod_mgr_install_local;".. fgettext("Local install") .. "]" ..
-
---		TODO Disabled due to service being offline, and not likely to come online again, in this form
---		"button[0,4.85;5.25,0.5;btn_modstore;".. fgettext("Online mod repository") .. "]"
-		""
+		"button[0,4.85;5.25,0.5;btn_modstore;".. fgettext("Online mod repository") .. "]"
 
 	local selected_mod = nil
 
@@ -60,7 +57,7 @@ local function get_formspec(tabview, name, tabdata)
 		end
 
 		if modscreenshot == nil then
-				modscreenshot = defaulttexturedir .. "no_screenshot.png"
+				modscreenshot = modstore.basetexturedir .. "no_screenshot.png"
 		end
 
 		retval = retval
@@ -78,7 +75,7 @@ local function get_formspec(tabview, name, tabdata)
 			descriptionfile:close()
 		else
 			descriptionlines = {}
-			descriptionlines[#descriptionlines + 1] = fgettext("No mod description available")
+			table.insert(descriptionlines,fgettext("No mod description available"))
 		end
 
 		retval = retval ..
@@ -99,7 +96,7 @@ local function get_formspec(tabview, name, tabdata)
 		else
 			--show dependencies
 
-			retval = retval .. "," .. fgettext("Depends:") .. ","
+			retval = retval .. ",Depends:,"
 
 			local toadd = modmgr.get_dependencies(selected_mod.path)
 

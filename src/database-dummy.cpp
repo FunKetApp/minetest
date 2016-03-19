@@ -18,39 +18,58 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 /*
-Dummy database class
+Dummy "database" class
 */
+
 
 #include "database-dummy.h"
 
+#include "map.h"
+#include "mapsector.h"
+#include "mapblock.h"
+#include "serialization.h"
+#include "main.h"
+#include "settings.h"
+#include "log.h"
 
-bool Database_Dummy::saveBlock(const v3s16 &pos, const std::string &data)
+Database_Dummy::Database_Dummy(ServerMap *map)
 {
-	m_database[getBlockAsInteger(pos)] = data;
+	srvmap = map;
+}
+
+int Database_Dummy::Initialized(void)
+{
+	return 1;
+}
+
+void Database_Dummy::beginSave() {}
+void Database_Dummy::endSave() {}
+
+bool Database_Dummy::saveBlock(v3s16 blockpos, std::string &data)
+{
+	m_database[getBlockAsInteger(blockpos)] = data;
 	return true;
 }
 
-std::string Database_Dummy::loadBlock(const v3s16 &pos)
+std::string Database_Dummy::loadBlock(v3s16 blockpos)
 {
-	s64 i = getBlockAsInteger(pos);
-	std::map<s64, std::string>::iterator it = m_database.find(i);
-	if (it == m_database.end())
+	if (m_database.count(getBlockAsInteger(blockpos)))
+		return m_database[getBlockAsInteger(blockpos)];
+	else
 		return "";
-	return it->second;
 }
 
-bool Database_Dummy::deleteBlock(const v3s16 &pos)
+void Database_Dummy::listAllLoadableBlocks(std::list<v3s16> &dst)
 {
-	m_database.erase(getBlockAsInteger(pos));
-	return true;
-}
-
-void Database_Dummy::listAllLoadableBlocks(std::vector<v3s16> &dst)
-{
-	dst.reserve(m_database.size());
-	for (std::map<s64, std::string>::const_iterator x = m_database.begin();
-			x != m_database.end(); ++x) {
-		dst.push_back(getIntegerAsBlock(x->first));
+	for(std::map<u64, std::string>::iterator x = m_database.begin(); x != m_database.end(); ++x)
+	{
+		v3s16 p = getIntegerAsBlock(x->first);
+		//dstream<<"block_i="<<block_i<<" p="<<PP(p)<<std::endl;
+		dst.push_back(p);
 	}
 }
 
+Database_Dummy::~Database_Dummy()
+{
+	m_database.clear();
+}

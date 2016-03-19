@@ -22,7 +22,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "irrlichttypes_bloated.h"
 #include "util/string.h"
-#include "threading/mutex.h"
+#include "jthread/jmutex.h"
 #include <string>
 #include <map>
 #include <list>
@@ -31,12 +31,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 class Settings;
 struct NoiseParams;
 
-// Global objects
-extern Settings *g_settings;
-extern std::string g_settings_path;
-
 /** function type to register a changed callback */
-typedef void (*setting_changed_callback)(const std::string &name, void *data);
+typedef void (*setting_changed_callback)(const std::string);
 
 enum ValueType {
 	VALUETYPE_STRING,
@@ -206,28 +202,22 @@ public:
 	// remove a setting
 	bool remove(const std::string &name);
 	void clear();
-	void clearDefaults();
 	void updateValue(const Settings &other, const std::string &name);
 	void update(const Settings &other);
-	void registerChangedCallback(std::string name, setting_changed_callback cbf, void *userdata = NULL);
-	void deregisterChangedCallback(std::string name, setting_changed_callback cbf, void *userdata = NULL);
+	void registerChangedCallback(std::string name, setting_changed_callback cbf);
 
 private:
 
 	void updateNoLock(const Settings &other);
 	void clearNoLock();
-	void clearDefaultsNoLock();
 
 	void doCallbacks(std::string name);
 
 	std::map<std::string, SettingsEntry> m_settings;
 	std::map<std::string, SettingsEntry> m_defaults;
-
-	std::map<std::string, std::vector<std::pair<setting_changed_callback,void*> > > m_callbacks;
-
-	mutable Mutex m_callbackMutex;
-	mutable Mutex m_mutex; // All methods that access m_settings/m_defaults directly should lock this.
-
+	std::map<std::string, std::vector<setting_changed_callback> > m_callbacks;
+	// All methods that access m_settings/m_defaults directly should lock this.
+	mutable JMutex m_mutex;
 };
 
 #endif

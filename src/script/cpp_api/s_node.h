@@ -20,10 +20,11 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #ifndef S_NODE_H_
 #define S_NODE_H_
 
+#include <map>
+
 #include "irr_v3d.h"
 #include "cpp_api/s_base.h"
 #include "cpp_api/s_nodemeta.h"
-#include "util/string.h"
 
 struct MapNode;
 class ServerActiveObject;
@@ -46,7 +47,7 @@ public:
 	bool node_on_timer(v3s16 p, MapNode node, f32 dtime);
 	void node_on_receive_fields(v3s16 p,
 			const std::string &formname,
-			const StringMap &fields,
+			const std::map<std::string, std::string> &fields,
 			ServerActiveObject *sender);
 	void node_falling_update(v3s16 p);
 	void node_falling_update_single(v3s16 p);

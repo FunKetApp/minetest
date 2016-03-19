@@ -41,7 +41,6 @@ dofile(menupath .. DIR_DELIM .. "dlg_config_world.lua")
 dofile(menupath .. DIR_DELIM .. "tab_credits.lua")
 dofile(menupath .. DIR_DELIM .. "tab_mods.lua")
 dofile(menupath .. DIR_DELIM .. "tab_settings.lua")
-dofile(menupath .. DIR_DELIM .. "dlg_settings_advanced.lua")
 if PLATFORM ~= "Android" then
 	dofile(menupath .. DIR_DELIM .. "dlg_create_world.lua")
 	dofile(menupath .. DIR_DELIM .. "dlg_delete_mod.lua")
@@ -141,9 +140,9 @@ local function init_globals()
 
 	tv_main:set_global_event_handler(main_event_handler)
 
-	tv_main:set_fixed_size(false)
-
-	if not (PLATFORM == "Android") then
+	if PLATFORM == "Android" then
+		tv_main:set_fixed_size(false)
+	else
 		tv_main:set_tab(core.setting_get("maintab_LAST"))
 	end
 	ui.set_default("maintab")

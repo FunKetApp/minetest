@@ -30,9 +30,9 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 	NodeMetadata
 */
 
-NodeMetadata::NodeMetadata(IItemDefManager *item_def_mgr):
+NodeMetadata::NodeMetadata(IGameDef *gamedef):
 	m_stringvars(),
-	m_inventory(new Inventory(item_def_mgr))
+	m_inventory(new Inventory(gamedef->idef()))
 {
 }
 
@@ -45,11 +45,10 @@ void NodeMetadata::serialize(std::ostream &os) const
 {
 	int num_vars = m_stringvars.size();
 	writeU32(os, num_vars);
-	for (StringMap::const_iterator
-			it = m_stringvars.begin();
-			it != m_stringvars.end(); ++it) {
-		os << serializeString(it->first);
-		os << serializeLongString(it->second);
+	for(std::map<std::string, std::string>::const_iterator
+			i = m_stringvars.begin(); i != m_stringvars.end(); i++){
+		os<<serializeString(i->first);
+		os<<serializeLongString(i->second);
 	}
 
 	m_inventory->serialize(os);
@@ -96,39 +95,39 @@ void NodeMetadataList::serialize(std::ostream &os) const
 
 	for(std::map<v3s16, NodeMetadata*>::const_iterator
 			i = m_data.begin();
-			i != m_data.end(); ++i)
+			i != m_data.end(); i++)
 	{
 		v3s16 p = i->first;
 		NodeMetadata *data = i->second;
 
-		u16 p16 = p.Z * MAP_BLOCKSIZE * MAP_BLOCKSIZE + p.Y * MAP_BLOCKSIZE + p.X;
+		u16 p16 = p.Z*MAP_BLOCKSIZE*MAP_BLOCKSIZE + p.Y*MAP_BLOCKSIZE + p.X;
 		writeU16(os, p16);
 
 		data->serialize(os);
 	}
 }
 
-void NodeMetadataList::deSerialize(std::istream &is, IItemDefManager *item_def_mgr)
+void NodeMetadataList::deSerialize(std::istream &is, IGameDef *gamedef)
 {
-	clear();
+	m_data.clear();
 
 	u8 version = readU8(is);
-
-	if (version == 0) {
+	
+	if(version == 0){
 		// Nothing
 		return;
 	}
 
-	if (version != 1) {
-		std::string err_str = std::string(FUNCTION_NAME)
-			+ ": version " + itos(version) + " not supported";
-		infostream << err_str << std::endl;
-		throw SerializationError(err_str);
+	if(version != 1){
+		infostream<<__FUNCTION_NAME<<": version "<<version<<" not supported"
+				<<std::endl;
+		throw SerializationError("NodeMetadataList::deSerialize");
 	}
 
 	u16 count = readU16(is);
 
-	for (u16 i=0; i < count; i++) {
+	for(u16 i=0; i<count; i++)
+	{
 		u16 p16 = readU16(is);
 
 		v3s16 p;
@@ -138,15 +137,16 @@ void NodeMetadataList::deSerialize(std::istream &is, IItemDefManager *item_def_m
 		p16 &= MAP_BLOCKSIZE - 1;
 		p.X = p16;
 
-		if (m_data.find(p) != m_data.end()) {
-			warningstream<<"NodeMetadataList::deSerialize(): "
+		if(m_data.find(p) != m_data.end())
+		{
+			infostream<<"WARNING: NodeMetadataList::deSerialize(): "
 					<<"already set data at position"
 					<<"("<<p.X<<","<<p.Y<<","<<p.Z<<"): Ignoring."
 					<<std::endl;
 			continue;
 		}
 
-		NodeMetadata *data = new NodeMetadata(item_def_mgr);
+		NodeMetadata *data = new NodeMetadata(gamedef);
 		data->deSerialize(is);
 		m_data[p] = data;
 	}
@@ -157,21 +157,10 @@ NodeMetadataList::~NodeMetadataList()
 	clear();
 }
 
-std::vector<v3s16> NodeMetadataList::getAllKeys()
+NodeMetadata* NodeMetadataList::get(v3s16 p)
 {
-	std::vector<v3s16> keys;
-
-	std::map<v3s16, NodeMetadata *>::const_iterator it;
-	for (it = m_data.begin(); it != m_data.end(); ++it)
-		keys.push_back(it->first);
-
-	return keys;
-}
-
-NodeMetadata *NodeMetadataList::get(v3s16 p)
-{
-	std::map<v3s16, NodeMetadata *>::const_iterator n = m_data.find(p);
-	if (n == m_data.end())
+	std::map<v3s16, NodeMetadata*>::const_iterator n = m_data.find(p);
+	if(n == m_data.end())
 		return NULL;
 	return n->second;
 }
@@ -179,7 +168,8 @@ NodeMetadata *NodeMetadataList::get(v3s16 p)
 void NodeMetadataList::remove(v3s16 p)
 {
 	NodeMetadata *olddata = get(p);
-	if (olddata) {
+	if(olddata)
+	{
 		delete olddata;
 		m_data.erase(p);
 	}
@@ -193,20 +183,22 @@ void NodeMetadataList::set(v3s16 p, NodeMetadata *d)
 
 void NodeMetadataList::clear()
 {
-	std::map<v3s16, NodeMetadata*>::iterator it;
-	for (it = m_data.begin(); it != m_data.end(); ++it) {
-		delete it->second;
+	for(std::map<v3s16, NodeMetadata*>::iterator
+			i = m_data.begin();
+			i != m_data.end(); i++)
+	{
+		delete i->second;
 	}
 	m_data.clear();
 }
 
-std::string NodeMetadata::getString(const std::string &name,
-	unsigned short recursion) const
+std::string NodeMetadata::getString(const std::string &name, unsigned short recursion) const
 {
-	StringMap::const_iterator it = m_stringvars.find(name);
-	if (it == m_stringvars.end())
+	std::map<std::string, std::string>::const_iterator it;
+	it = m_stringvars.find(name);
+	if (it == m_stringvars.end()) {
 		return "";
-
+	}
 	return resolveString(it->second, recursion);
 }
 
@@ -219,8 +211,7 @@ void NodeMetadata::setString(const std::string &name, const std::string &var)
 	}
 }
 
-std::string NodeMetadata::resolveString(const std::string &str,
-	unsigned short recursion) const
+std::string NodeMetadata::resolveString(const std::string &str, unsigned short recursion) const
 {
 	if (recursion > 1) {
 		return str;

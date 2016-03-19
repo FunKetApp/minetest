@@ -19,9 +19,10 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "nodedef.h"
 
+#include "main.h" // For g_settings
 #include "itemdef.h"
 #ifndef SERVER
-#include "client/tile.h"
+#include "tile.h"
 #include "mesh.h"
 #include <IMeshManipulator.h>
 #endif
@@ -33,8 +34,6 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "exceptions.h"
 #include "debug.h"
 #include "gamedef.h"
-#include "mapnode.h"
-#include <fstream> // Used in applyTextureOverrides()
 
 /*
 	NodeBox
@@ -49,91 +48,44 @@ void NodeBox::reset()
 	wall_top = aabb3f(-BS/2, BS/2-BS/16., -BS/2, BS/2, BS/2, BS/2);
 	wall_bottom = aabb3f(-BS/2, -BS/2, -BS/2, BS/2, -BS/2+BS/16., BS/2);
 	wall_side = aabb3f(-BS/2, -BS/2, -BS/2, -BS/2+BS/16., BS/2, BS/2);
-	// no default for other parts
-	connect_top.clear();
-	connect_bottom.clear();
-	connect_front.clear();
-	connect_left.clear();
-	connect_back.clear();
-	connect_right.clear();
 }
 
 void NodeBox::serialize(std::ostream &os, u16 protocol_version) const
 {
-	int version = 1;
-	if (protocol_version >= 27)
-		version = 3;
-	else if (protocol_version >= 21)
-		version = 2;
+	int version = protocol_version >= 21 ? 2 : 1;
 	writeU8(os, version);
 
-	switch (type) {
-	case NODEBOX_LEVELED:
-	case NODEBOX_FIXED:
-		if (version == 1)
-			writeU8(os, NODEBOX_FIXED);
-		else
-			writeU8(os, type);
+	if (version == 1 && type == NODEBOX_LEVELED)
+		writeU8(os, NODEBOX_FIXED);
+	else
+		writeU8(os, type);
 
+	if(type == NODEBOX_FIXED || type == NODEBOX_LEVELED)
+	{
 		writeU16(os, fixed.size());
-		for (std::vector<aabb3f>::const_iterator
+		for(std::vector<aabb3f>::const_iterator
 				i = fixed.begin();
-				i != fixed.end(); ++i)
+				i != fixed.end(); i++)
 		{
 			writeV3F1000(os, i->MinEdge);
 			writeV3F1000(os, i->MaxEdge);
 		}
-		break;
-	case NODEBOX_WALLMOUNTED:
-		writeU8(os, type);
-
+	}
+	else if(type == NODEBOX_WALLMOUNTED)
+	{
 		writeV3F1000(os, wall_top.MinEdge);
 		writeV3F1000(os, wall_top.MaxEdge);
 		writeV3F1000(os, wall_bottom.MinEdge);
 		writeV3F1000(os, wall_bottom.MaxEdge);
 		writeV3F1000(os, wall_side.MinEdge);
 		writeV3F1000(os, wall_side.MaxEdge);
-		break;
-	case NODEBOX_CONNECTED:
-		if (version <= 2) {
-			// send old clients nodes that can't be walked through
-			// to prevent abuse
-			writeU8(os, NODEBOX_FIXED);
-
-			writeU16(os, 1);
-			writeV3F1000(os, v3f(-BS/2, -BS/2, -BS/2));
-			writeV3F1000(os, v3f(BS/2, BS/2, BS/2));
-		} else {
-			writeU8(os, type);
-
-#define WRITEBOX(box) do { \
-		writeU16(os, (box).size()); \
-		for (std::vector<aabb3f>::const_iterator \
-				i = (box).begin(); \
-				i != (box).end(); ++i) { \
-			writeV3F1000(os, i->MinEdge); \
-			writeV3F1000(os, i->MaxEdge); \
-		}; } while (0)
-
-			WRITEBOX(fixed);
-			WRITEBOX(connect_top);
-			WRITEBOX(connect_bottom);
-			WRITEBOX(connect_front);
-			WRITEBOX(connect_left);
-			WRITEBOX(connect_back);
-			WRITEBOX(connect_right);
-		}
-		break;
-	default:
-		writeU8(os, type);
-		break;
 	}
 }
 
 void NodeBox::deSerialize(std::istream &is)
 {
 	int version = readU8(is);
-	if (version < 1 || version > 3)
+	if(version < 1 || version > 2)
 		throw SerializationError("unsupported NodeBox version");
 
 	reset();
@@ -160,26 +112,6 @@ void NodeBox::deSerialize(std::istream &is)
 		wall_side.MinEdge = readV3F1000(is);
 		wall_side.MaxEdge = readV3F1000(is);
 	}
-	else if (type == NODEBOX_CONNECTED)
-	{
-#define READBOXES(box) do { \
-		count = readU16(is); \
-		(box).reserve(count); \
-		while (count--) { \
-			v3f min = readV3F1000(is); \
-			v3f max = readV3F1000(is); \
-			(box).push_back(aabb3f(min, max)); }; } while (0)
-
-		u16 count;
-
-		READBOXES(fixed);
-		READBOXES(connect_top);
-		READBOXES(connect_bottom);
-		READBOXES(connect_front);
-		READBOXES(connect_left);
-		READBOXES(connect_back);
-		READBOXES(connect_right);
-	}
 }
 
 /*
@@ -188,9 +120,7 @@ void NodeBox::deSerialize(std::istream &is)
 
 void TileDef::serialize(std::ostream &os, u16 protocol_version) const
 {
-	if (protocol_version >= 26)
-		writeU8(os, 2);
-	else if (protocol_version >= 17)
+	if(protocol_version >= 17)
 		writeU8(os, 1);
 	else
 		writeU8(os, 0);
@@ -199,15 +129,11 @@ void TileDef::serialize(std::ostream &os, u16 protocol_version) const
 	writeU16(os, animation.aspect_w);
 	writeU16(os, animation.aspect_h);
 	writeF1000(os, animation.length);
-	if (protocol_version >= 17)
+	if(protocol_version >= 17)
 		writeU8(os, backface_culling);
-	if (protocol_version >= 26) {
-		writeU8(os, tileable_horizontal);
-		writeU8(os, tileable_vertical);
-	}
 }
 
-void TileDef::deSerialize(std::istream &is, const u8 contenfeatures_version, const NodeDrawType drawtype)
+void TileDef::deSerialize(std::istream &is)
 {
 	int version = readU8(is);
 	name = deSerializeString(is);
@@ -215,21 +141,9 @@ void TileDef::deSerialize(std::istream &is, const u8 contenfeatures_version, con
 	animation.aspect_w = readU16(is);
 	animation.aspect_h = readU16(is);
 	animation.length = readF1000(is);
-	if (version >= 1)
+	if(version >= 1)
 		backface_culling = readU8(is);
-	if (version >= 2) {
-		tileable_horizontal = readU8(is);
-		tileable_vertical = readU8(is);
-	}
-
-	if ((contenfeatures_version < 8) &&
-		((drawtype == NDT_MESH) ||
-		 (drawtype == NDT_FIRELIKE) ||
-		 (drawtype == NDT_LIQUID) ||
-		 (drawtype == NDT_PLANTLIKE)))
-		backface_culling = false;
 }
-
 
 /*
 	SimpleSoundSpec serialization
@@ -269,7 +183,6 @@ void ContentFeatures::reset()
 	solidness = 2;
 	visual_solidness = 0;
 	backface_culling = true;
-
 #endif
 	has_on_construct = false;
 	has_on_destruct = false;
@@ -289,7 +202,6 @@ void ContentFeatures::reset()
 #ifndef SERVER
 	for(u32 i = 0; i < 24; i++)
 		mesh_ptr[i] = NULL;
-	minimap_color = video::SColor(0, 0, 0, 0);
 #endif
 	visual_scale = 1.0;
 	for(u32 i = 0; i < 6; i++)
@@ -308,7 +220,6 @@ void ContentFeatures::reset()
 	diggable = true;
 	climbable = false;
 	buildable_to = false;
-	floodable = false;
 	rightclickable = true;
 	leveled = 0;
 	liquid_type = LIQUID_NONE;
@@ -316,6 +227,7 @@ void ContentFeatures::reset()
 	liquid_alternative_source = "";
 	liquid_viscosity = 0;
 	liquid_renewable = true;
+	freezemelt = "";
 	liquid_range = LIQUID_LEVEL_MAX+1;
 	drowning = 0;
 	light_source = 0;
@@ -329,24 +241,20 @@ void ContentFeatures::reset()
 	sound_footstep = SimpleSoundSpec();
 	sound_dig = SimpleSoundSpec("__group");
 	sound_dug = SimpleSoundSpec();
-	connects_to.clear();
-	connects_to_ids.clear();
-	connect_sides = 0;
 }
 
-void ContentFeatures::serialize(std::ostream &os, u16 protocol_version) const
+void ContentFeatures::serialize(std::ostream &os, u16 protocol_version)
 {
 	if(protocol_version < 24){
 		serializeOld(os, protocol_version);
 		return;
 	}
 
-	writeU8(os, protocol_version < 27 ? 7 : 8);
-
+	writeU8(os, 7); // version
 	os<<serializeString(name);
 	writeU16(os, groups.size());
 	for(ItemGroupList::const_iterator
-			i = groups.begin(); i != groups.end(); ++i){
+			i = groups.begin(); i != groups.end(); i++){
 		os<<serializeString(i->first);
 		writeS16(os, i->second);
 	}
@@ -398,22 +306,14 @@ void ContentFeatures::serialize(std::ostream &os, u16 protocol_version) const
 	// the protocol version
 	os<<serializeString(mesh);
 	collision_box.serialize(os, protocol_version);
-	writeU8(os, floodable);
-	writeU16(os, connects_to_ids.size());
-	for (std::set<content_t>::const_iterator i = connects_to_ids.begin();
-			i != connects_to_ids.end(); ++i)
-		writeU16(os, *i);
-	writeU8(os, connect_sides);
 }
 
 void ContentFeatures::deSerialize(std::istream &is)
 {
 	int version = readU8(is);
-	if (version < 7) {
+	if(version != 7){
 		deSerializeOld(is, version);
 		return;
-	} else if (version > 8) {
-		throw SerializationError("unsupported ContentFeatures version");
 	}
 
 	name = deSerializeString(is);
@@ -425,16 +325,15 @@ void ContentFeatures::deSerialize(std::istream &is)
 		groups[name] = value;
 	}
 	drawtype = (enum NodeDrawType)readU8(is);
-
 	visual_scale = readF1000(is);
 	if(readU8(is) != 6)
 		throw SerializationError("unsupported tile count");
 	for(u32 i = 0; i < 6; i++)
-		tiledef[i].deSerialize(is, version, drawtype);
+		tiledef[i].deSerialize(is);
 	if(readU8(is) != CF_SPECIAL_COUNT)
 		throw SerializationError("unsupported CF_SPECIAL_COUNT");
 	for(u32 i = 0; i < CF_SPECIAL_COUNT; i++)
-		tiledef_special[i].deSerialize(is, version, drawtype);
+		tiledef_special[i].deSerialize(is);
 	alpha = readU8(is);
 	post_effect_color.setAlpha(readU8(is));
 	post_effect_color.setRed(readU8(is));
@@ -477,12 +376,6 @@ void ContentFeatures::deSerialize(std::istream &is)
 		// otherwise changes the protocol version
 	mesh = deSerializeString(is);
 	collision_box.deSerialize(is);
-	floodable = readU8(is);
-	u16 connects_to_size = readU16(is);
-	connects_to_ids.clear();
-	for (u16 i = 0; i < connects_to_size; i++)
-		connects_to_ids.insert(readU16(is));
-	connect_sides = readU8(is);
 	}catch(SerializationError &e) {};
 }
 
@@ -500,28 +393,16 @@ public:
 	inline virtual const ContentFeatures& get(const MapNode &n) const;
 	virtual bool getId(const std::string &name, content_t &result) const;
 	virtual content_t getId(const std::string &name) const;
-	virtual bool getIds(const std::string &name, std::set<content_t> &result) const;
+	virtual void getIds(const std::string &name, std::set<content_t> &result) const;
 	virtual const ContentFeatures& get(const std::string &name) const;
 	content_t allocateId();
 	virtual content_t set(const std::string &name, const ContentFeatures &def);
 	virtual content_t allocateDummy(const std::string &name);
 	virtual void updateAliases(IItemDefManager *idef);
-	virtual void applyTextureOverrides(const std::string &override_filepath);
-	virtual void updateTextures(IGameDef *gamedef,
-		void (*progress_cbk)(void *progress_args, u32 progress, u32 max_progress),
-		void *progress_cbk_args);
-	void serialize(std::ostream &os, u16 protocol_version) const;
+	virtual void updateTextures(IGameDef *gamedef);
+	void serialize(std::ostream &os, u16 protocol_version);
 	void deSerialize(std::istream &is);
-
-	inline virtual bool getNodeRegistrationStatus() const;
-	inline virtual void setNodeRegistrationStatus(bool completed);
-
-	virtual void pendNodeResolve(NodeResolver *nr);
-	virtual bool cancelNodeResolveCallback(NodeResolver *nr);
-	virtual void runNodeResolveCallbacks();
-	virtual void resetNodeResolveState();
-	virtual void mapNodeboxConnections();
-	virtual bool nodeboxConnects(MapNode from, MapNode to, u8 connect_face);
+	virtual NodeResolver *getResolver();
 
 private:
 	void addNameIdMapping(content_t i, std::string name);
@@ -551,15 +432,13 @@ private:
 	// Next possibly free id
 	content_t m_next_id;
 
-	// NodeResolvers to callback once node registration has ended
-	std::vector<NodeResolver *> m_pending_resolve_callbacks;
-
-	// True when all nodes have been registered
-	bool m_node_registration_complete;
+	// NodeResolver to queue pending node resolutions
+	NodeResolver m_resolver;
 };
 
 
-CNodeDefManager::CNodeDefManager()
+CNodeDefManager::CNodeDefManager() :
+	m_resolver(this)
 {
 	clear();
 }
@@ -586,8 +465,6 @@ void CNodeDefManager::clear()
 	m_name_id_mapping_with_aliases.clear();
 	m_group_to_items.clear();
 	m_next_id = 0;
-
-	resetNodeResolveState();
 
 	u32 initial_length = 0;
 	initial_length = MYMAX(initial_length, CONTENT_UNKNOWN + 1);
@@ -617,7 +494,6 @@ void CNodeDefManager::clear()
 		f.pointable           = false;
 		f.diggable            = false;
 		f.buildable_to        = true;
-		f.floodable           = true;
 		f.is_ground_content   = true;
 		// Insert directly into containers
 		content_t c = CONTENT_AIR;
@@ -686,23 +562,22 @@ content_t CNodeDefManager::getId(const std::string &name) const
 }
 
 
-bool CNodeDefManager::getIds(const std::string &name,
+void CNodeDefManager::getIds(const std::string &name,
 		std::set<content_t> &result) const
 {
 	//TimeTaker t("getIds", NULL, PRECISION_MICRO);
 	if (name.substr(0,6) != "group:") {
 		content_t id = CONTENT_IGNORE;
-		bool exists = getId(name, id);
-		if (exists)
+		if(getId(name, id))
 			result.insert(id);
-		return exists;
+		return;
 	}
 	std::string group = name.substr(6);
 
 	std::map<std::string, GroupItems>::const_iterator
 		i = m_group_to_items.find(group);
 	if (i == m_group_to_items.end())
-		return true;
+		return;
 
 	const GroupItems &items = i->second;
 	for (GroupItems::const_iterator j = items.begin();
@@ -711,7 +586,6 @@ bool CNodeDefManager::getIds(const std::string &name,
 			result.insert((*j).first);
 	}
 	//printf("getIds: %dus\n", t.stop());
-	return true;
 }
 
 
@@ -747,13 +621,12 @@ content_t CNodeDefManager::allocateId()
 // IWritableNodeDefManager
 content_t CNodeDefManager::set(const std::string &name, const ContentFeatures &def)
 {
-	// Pre-conditions
 	assert(name != "");
 	assert(name == def.name);
 
 	// Don't allow redefining ignore (but allow air and unknown)
 	if (name == "ignore") {
-		warningstream << "NodeDefManager: Ignoring "
+		infostream << "NodeDefManager: WARNING: Ignoring "
 			"CONTENT_IGNORE redefinition"<<std::endl;
 		return CONTENT_IGNORE;
 	}
@@ -763,7 +636,7 @@ content_t CNodeDefManager::set(const std::string &name, const ContentFeatures &d
 		// Get new id
 		id = allocateId();
 		if (id == CONTENT_IGNORE) {
-			warningstream << "NodeDefManager: Absolute "
+			infostream << "NodeDefManager: WARNING: Absolute "
 				"limit reached" << std::endl;
 			return CONTENT_IGNORE;
 		}
@@ -785,7 +658,7 @@ content_t CNodeDefManager::set(const std::string &name, const ContentFeatures &d
 			j = m_group_to_items.find(group_name);
 		if (j == m_group_to_items.end()) {
 			m_group_to_items[group_name].push_back(
-				std::make_pair(id, i->second));
+					std::make_pair(id, i->second));
 		} else {
 			GroupItems &items = j->second;
 			items.push_back(std::make_pair(id, i->second));
@@ -797,7 +670,7 @@ content_t CNodeDefManager::set(const std::string &name, const ContentFeatures &d
 
 content_t CNodeDefManager::allocateDummy(const std::string &name)
 {
-	assert(name != "");	// Pre-condition
+	assert(name != "");
 	ContentFeatures f;
 	f.name = name;
 	return set(name, f);
@@ -809,108 +682,43 @@ void CNodeDefManager::updateAliases(IItemDefManager *idef)
 	std::set<std::string> all = idef->getAll();
 	m_name_id_mapping_with_aliases.clear();
 	for (std::set<std::string>::iterator
-			i = all.begin(); i != all.end(); ++i) {
+			i = all.begin(); i != all.end(); i++) {
 		std::string name = *i;
 		std::string convert_to = idef->getAlias(name);
 		content_t id;
 		if (m_name_id_mapping.getId(convert_to, id)) {
 			m_name_id_mapping_with_aliases.insert(
-				std::make_pair(name, id));
+					std::make_pair(name, id));
 		}
 	}
 }
 
-void CNodeDefManager::applyTextureOverrides(const std::string &override_filepath)
-{
-	infostream << "CNodeDefManager::applyTextureOverrides(): Applying "
-		"overrides to textures from " << override_filepath << std::endl;
 
-	std::ifstream infile(override_filepath.c_str());
-	std::string line;
-	int line_c = 0;
-	while (std::getline(infile, line)) {
-		line_c++;
-		if (trim(line) == "")
-			continue;
-		std::vector<std::string> splitted = str_split(line, ' ');
-		if (splitted.size() != 3) {
-			errorstream << override_filepath
-				<< ":" << line_c << " Could not apply texture override \""
-				<< line << "\": Syntax error" << std::endl;
-			continue;
-		}
-
-		content_t id;
-		if (!getId(splitted[0], id)) {
-			errorstream << override_filepath
-				<< ":" << line_c << " Could not apply texture override \""
-				<< line << "\": Unknown node \""
-				<< splitted[0] << "\"" << std::endl;
-			continue;
-		}
-
-		ContentFeatures &nodedef = m_content_features[id];
-
-		if (splitted[1] == "top")
-			nodedef.tiledef[0].name = splitted[2];
-		else if (splitted[1] == "bottom")
-			nodedef.tiledef[1].name = splitted[2];
-		else if (splitted[1] == "right")
-			nodedef.tiledef[2].name = splitted[2];
-		else if (splitted[1] == "left")
-			nodedef.tiledef[3].name = splitted[2];
-		else if (splitted[1] == "back")
-			nodedef.tiledef[4].name = splitted[2];
-		else if (splitted[1] == "front")
-			nodedef.tiledef[5].name = splitted[2];
-		else if (splitted[1] == "all" || splitted[1] == "*")
-			for (int i = 0; i < 6; i++)
-				nodedef.tiledef[i].name = splitted[2];
-		else if (splitted[1] == "sides")
-			for (int i = 2; i < 6; i++)
-				nodedef.tiledef[i].name = splitted[2];
-		else {
-			errorstream << override_filepath
-				<< ":" << line_c << " Could not apply texture override \""
-				<< line << "\": Unknown node side \""
-				<< splitted[1] << "\"" << std::endl;
-			continue;
-		}
-	}
-}
-
-void CNodeDefManager::updateTextures(IGameDef *gamedef,
-	void (*progress_callback)(void *progress_args, u32 progress, u32 max_progress),
-	void *progress_callback_args)
+void CNodeDefManager::updateTextures(IGameDef *gamedef)
 {
 #ifndef SERVER
 	infostream << "CNodeDefManager::updateTextures(): Updating "
 		"textures in node definitions" << std::endl;
+
 	ITextureSource *tsrc = gamedef->tsrc();
 	IShaderSource *shdsrc = gamedef->getShaderSource();
 	scene::ISceneManager* smgr = gamedef->getSceneManager();
 	scene::IMeshManipulator* meshmanip = smgr->getMeshManipulator();
 
+	bool new_style_water           = g_settings->getBool("new_style_water");
+	bool new_style_leaves          = g_settings->getBool("new_style_leaves");
 	bool connected_glass           = g_settings->getBool("connected_glass");
 	bool opaque_water              = g_settings->getBool("opaque_water");
 	bool enable_shaders            = g_settings->getBool("enable_shaders");
 	bool enable_bumpmapping        = g_settings->getBool("enable_bumpmapping");
 	bool enable_parallax_occlusion = g_settings->getBool("enable_parallax_occlusion");
 	bool enable_mesh_cache         = g_settings->getBool("enable_mesh_cache");
-	bool enable_minimap            = g_settings->getBool("enable_minimap");
-	std::string leaves_style       = g_settings->get("leaves_style");
 
 	bool use_normal_texture = enable_shaders &&
 		(enable_bumpmapping || enable_parallax_occlusion);
 
-	u32 size = m_content_features.size();
-
-	for (u32 i = 0; i < size; i++) {
+	for (u32 i = 0; i < m_content_features.size(); i++) {
 		ContentFeatures *f = &m_content_features[i];
-
-		// minimap pixel color - the average color of a texture
-		if (enable_minimap && f->tiledef[0].name != "")
-			f->minimap_color = tsrc->getTextureAverageColor(f->tiledef[0].name);
 
 		// Figure out the actual tiles to use
 		TileDef tiledef[6];
@@ -938,7 +746,12 @@ void CNodeDefManager::updateTextures(IGameDef *gamedef,
 			assert(f->liquid_type == LIQUID_SOURCE);
 			if (opaque_water)
 				f->alpha = 255;
-			f->solidness = 1;
+			if (new_style_water){
+				f->solidness = 0;
+			} else {
+				f->solidness = 1;
+				f->backface_culling = false;
+			}
 			is_liquid = true;
 			break;
 		case NDT_FLOWINGLIQUID:
@@ -966,16 +779,8 @@ void CNodeDefManager::updateTextures(IGameDef *gamedef,
 			f->visual_solidness = 1;
 			break;
 		case NDT_ALLFACES_OPTIONAL:
-			if (leaves_style == "fancy") {
+			if (new_style_leaves) {
 				f->drawtype = NDT_ALLFACES;
-				f->solidness = 0;
-				f->visual_solidness = 1;
-			} else if (leaves_style == "simple") {
-				for (u32 j = 0; j < 6; j++) {
-					if (f->tiledef_special[j].name != "")
-						tiledef[j].name = f->tiledef_special[j].name;
-				}
-				f->drawtype = NDT_GLASSLIKE;
 				f->solidness = 0;
 				f->visual_solidness = 1;
 			} else {
@@ -989,14 +794,17 @@ void CNodeDefManager::updateTextures(IGameDef *gamedef,
 			break;
 		case NDT_PLANTLIKE:
 			f->solidness = 0;
+			f->backface_culling = false;
 			if (f->waving == 1)
 				material_type = TILE_MATERIAL_WAVING_PLANTS;
 			break;
 		case NDT_FIRELIKE:
+			f->backface_culling = false;
 			f->solidness = 0;
 			break;
 		case NDT_MESH:
 			f->solidness = 0;
+			f->backface_culling = false;
 			break;
 		case NDT_TORCHLIKE:
 		case NDT_SIGNLIKE:
@@ -1028,7 +836,7 @@ void CNodeDefManager::updateTextures(IGameDef *gamedef,
 		// Tiles (fill in f->tiles[])
 		for (u16 j = 0; j < 6; j++) {
 			fillTileAttribs(tsrc, &f->tiles[j], &tiledef[j], tile_shader[j],
-				use_normal_texture, f->tiledef[j].backface_culling, f->alpha, material_type);
+				use_normal_texture, f->backface_culling, f->alpha, material_type);
 		}
 
 		// Special tiles (fill in f->special_tiles[])
@@ -1055,7 +863,7 @@ void CNodeDefManager::updateTextures(IGameDef *gamedef,
 			//Convert regular nodebox nodes to meshnodes
 			//Change the drawtype and apply scale
 			f->drawtype = NDT_MESH;
-			f->mesh_ptr[0] = convertNodeboxesToMesh(f->node_box.fixed);
+			f->mesh_ptr[0] = convertNodeboxNodeToMesh(f);
 			v3f scale = v3f(1.0, 1.0, 1.0) * f->visual_scale;
 			scaleMesh(f->mesh_ptr[0], scale);
 			recalculateBoundingBox(f->mesh_ptr[0]);
@@ -1082,8 +890,6 @@ void CNodeDefManager::updateTextures(IGameDef *gamedef,
 			recalculateBoundingBox(f->mesh_ptr[0]);
 			meshmanip->recalculateNormals(f->mesh_ptr[0], true, false);
 		}
-
-		progress_callback(progress_callback_args, i, size);
 	}
 #endif
 }
@@ -1095,15 +901,13 @@ void CNodeDefManager::fillTileAttribs(ITextureSource *tsrc, TileSpec *tile,
 		bool backface_culling, u8 alpha, u8 material_type)
 {
 	tile->shader_id     = shader_id;
-	tile->texture       = tsrc->getTextureForMesh(tiledef->name, &tile->texture_id);
+	tile->texture       = tsrc->getTexture(tiledef->name, &tile->texture_id);
 	tile->alpha         = alpha;
 	tile->material_type = material_type;
 
-	// Normal texture and shader flags texture
-	if (use_normal_texture) {
+	// Normal texture
+	if (use_normal_texture)
 		tile->normal_texture = tsrc->getNormalTexture(tiledef->name);
-	}
-	tile->flags_texture = tsrc->getShaderFlagsTexture(tile->normal_texture ? true : false);
 
 	// Material flags
 	tile->material_flags = 0;
@@ -1111,10 +915,6 @@ void CNodeDefManager::fillTileAttribs(ITextureSource *tsrc, TileSpec *tile,
 		tile->material_flags |= MATERIAL_FLAG_BACKFACE_CULLING;
 	if (tiledef->animation.type == TAT_VERTICAL_FRAMES)
 		tile->material_flags |= MATERIAL_FLAG_ANIMATION_VERTICAL_FRAMES;
-	if (tiledef->tileable_horizontal)
-		tile->material_flags |= MATERIAL_FLAG_TILEABLE_HORIZONTAL;
-	if (tiledef->tileable_vertical)
-		tile->material_flags |= MATERIAL_FLAG_TILEABLE_VERTICAL;
 
 	// Animation parameters
 	int frame_count = 1;
@@ -1144,10 +944,9 @@ void CNodeDefManager::fillTileAttribs(ITextureSource *tsrc, TileSpec *tile,
 			os << tiledef->name << "^[verticalframe:"
 				<< frame_count << ":" << i;
 
-			frame.texture = tsrc->getTextureForMesh(os.str(), &frame.texture_id);
+			frame.texture = tsrc->getTexture(os.str(), &frame.texture_id);
 			if (tile->normal_texture)
 				frame.normal_texture = tsrc->getNormalTexture(os.str());
-			frame.flags_texture = tile->flags_texture;
 			tile->frames[i] = frame;
 		}
 	}
@@ -1155,7 +954,7 @@ void CNodeDefManager::fillTileAttribs(ITextureSource *tsrc, TileSpec *tile,
 #endif
 
 
-void CNodeDefManager::serialize(std::ostream &os, u16 protocol_version) const
+void CNodeDefManager::serialize(std::ostream &os, u16 protocol_version)
 {
 	writeU8(os, 1); // version
 	u16 count = 0;
@@ -1164,7 +963,7 @@ void CNodeDefManager::serialize(std::ostream &os, u16 protocol_version) const
 		if (i == CONTENT_IGNORE || i == CONTENT_AIR
 				|| i == CONTENT_UNKNOWN)
 			continue;
-		const ContentFeatures *f = &m_content_features[i];
+		ContentFeatures *f = &m_content_features[i];
 		if (f->name == "")
 			continue;
 		writeU16(os2, i);
@@ -1174,9 +973,7 @@ void CNodeDefManager::serialize(std::ostream &os, u16 protocol_version) const
 		f->serialize(wrapper_os, protocol_version);
 		os2<<serializeString(wrapper_os.str());
 
-		// must not overflow
-		u16 next = count + 1;
-		FATAL_ERROR_IF(next < count, "Overflow");
+		assert(count + 1 > count); // must not overflow
 		count++;
 	}
 	writeU16(os, count);
@@ -1203,12 +1000,12 @@ void CNodeDefManager::deSerialize(std::istream &is)
 
 		// Check error conditions
 		if (i == CONTENT_IGNORE || i == CONTENT_AIR || i == CONTENT_UNKNOWN) {
-			warningstream << "NodeDefManager::deSerialize(): "
+			infostream << "NodeDefManager::deSerialize(): WARNING: "
 				"not changing builtin node " << i << std::endl;
 			continue;
 		}
 		if (f.name == "") {
-			warningstream << "NodeDefManager::deSerialize(): "
+			infostream << "NodeDefManager::deSerialize(): WARNING: "
 				"received empty name" << std::endl;
 			continue;
 		}
@@ -1216,7 +1013,7 @@ void CNodeDefManager::deSerialize(std::istream &is)
 		// Ignore aliases
 		u16 existing_id;
 		if (m_name_id_mapping.getId(f.name, existing_id) && i != existing_id) {
-			warningstream << "NodeDefManager::deSerialize(): "
+			infostream << "NodeDefManager::deSerialize(): WARNING: "
 				"already defined with different ID: " << f.name << std::endl;
 			continue;
 		}
@@ -1238,6 +1035,12 @@ void CNodeDefManager::addNameIdMapping(content_t i, std::string name)
 }
 
 
+NodeResolver *CNodeDefManager::getResolver()
+{
+	return &m_resolver;
+}
+
+
 IWritableNodeDefManager *createNodeDefManager()
 {
 	return new CNodeDefManager();
@@ -1245,7 +1048,7 @@ IWritableNodeDefManager *createNodeDefManager()
 
 
 //// Serialization of old ContentFeatures formats
-void ContentFeatures::serializeOld(std::ostream &os, u16 protocol_version) const
+void ContentFeatures::serializeOld(std::ostream &os, u16 protocol_version)
 {
 	if (protocol_version == 13)
 	{
@@ -1253,7 +1056,7 @@ void ContentFeatures::serializeOld(std::ostream &os, u16 protocol_version) const
 		os<<serializeString(name);
 		writeU16(os, groups.size());
 		for (ItemGroupList::const_iterator
-				i = groups.begin(); i != groups.end(); ++i) {
+				i = groups.begin(); i != groups.end(); i++) {
 			os<<serializeString(i->first);
 			writeS16(os, i->second);
 		}
@@ -1301,7 +1104,7 @@ void ContentFeatures::serializeOld(std::ostream &os, u16 protocol_version) const
 		os<<serializeString(name);
 		writeU16(os, groups.size());
 		for (ItemGroupList::const_iterator
-			i = groups.begin(); i != groups.end(); ++i) {
+			i = groups.begin(); i != groups.end(); i++) {
 				os<<serializeString(i->first);
 				writeS16(os, i->second);
 		}
@@ -1353,6 +1156,7 @@ void ContentFeatures::serializeOld(std::ostream &os, u16 protocol_version) const
 			"Unsupported version requested");
 }
 
+
 void ContentFeatures::deSerializeOld(std::istream &is, int version)
 {
 	if (version == 5) // In PROTOCOL_VERSION 13
@@ -1366,16 +1170,15 @@ void ContentFeatures::deSerializeOld(std::istream &is, int version)
 			groups[name] = value;
 		}
 		drawtype = (enum NodeDrawType)readU8(is);
-
 		visual_scale = readF1000(is);
 		if (readU8(is) != 6)
 			throw SerializationError("unsupported tile count");
 		for (u32 i = 0; i < 6; i++)
-			tiledef[i].deSerialize(is, version, drawtype);
+			tiledef[i].deSerialize(is);
 		if (readU8(is) != CF_SPECIAL_COUNT)
 			throw SerializationError("unsupported CF_SPECIAL_COUNT");
 		for (u32 i = 0; i < CF_SPECIAL_COUNT; i++)
-			tiledef_special[i].deSerialize(is, version, drawtype);
+			tiledef_special[i].deSerialize(is);
 		alpha = readU8(is);
 		post_effect_color.setAlpha(readU8(is));
 		post_effect_color.setRed(readU8(is));
@@ -1419,12 +1222,12 @@ void ContentFeatures::deSerializeOld(std::istream &is, int version)
 		if (readU8(is) != 6)
 			throw SerializationError("unsupported tile count");
 		for (u32 i = 0; i < 6; i++)
-			tiledef[i].deSerialize(is, version, drawtype);
+			tiledef[i].deSerialize(is);
 		// CF_SPECIAL_COUNT in version 6 = 2
 		if (readU8(is) != 2)
 			throw SerializationError("unsupported CF_SPECIAL_COUNT");
 		for (u32 i = 0; i < 2; i++)
-			tiledef_special[i].deSerialize(is, version, drawtype);
+			tiledef_special[i].deSerialize(is);
 		alpha = readU8(is);
 		post_effect_color.setAlpha(readU8(is));
 		post_effect_color.setRed(readU8(is));
@@ -1464,218 +1267,166 @@ void ContentFeatures::deSerializeOld(std::istream &is, int version)
 	}
 }
 
+/*
+	NodeResolver
+*/
 
-inline bool CNodeDefManager::getNodeRegistrationStatus() const
+NodeResolver::NodeResolver(INodeDefManager *ndef)
 {
-	return m_node_registration_complete;
-}
-
-
-inline void CNodeDefManager::setNodeRegistrationStatus(bool completed)
-{
-	m_node_registration_complete = completed;
-}
-
-
-void CNodeDefManager::pendNodeResolve(NodeResolver *nr)
-{
-	nr->m_ndef = this;
-	if (m_node_registration_complete)
-		nr->nodeResolveInternal();
-	else
-		m_pending_resolve_callbacks.push_back(nr);
-}
-
-
-bool CNodeDefManager::cancelNodeResolveCallback(NodeResolver *nr)
-{
-	size_t len = m_pending_resolve_callbacks.size();
-	for (size_t i = 0; i != len; i++) {
-		if (nr != m_pending_resolve_callbacks[i])
-			continue;
-
-		len--;
-		m_pending_resolve_callbacks[i] = m_pending_resolve_callbacks[len];
-		m_pending_resolve_callbacks.resize(len);
-		return true;
-	}
-
-	return false;
-}
-
-
-void CNodeDefManager::runNodeResolveCallbacks()
-{
-	for (size_t i = 0; i != m_pending_resolve_callbacks.size(); i++) {
-		NodeResolver *nr = m_pending_resolve_callbacks[i];
-		nr->nodeResolveInternal();
-	}
-
-	m_pending_resolve_callbacks.clear();
-}
-
-
-void CNodeDefManager::resetNodeResolveState()
-{
-	m_node_registration_complete = false;
-	m_pending_resolve_callbacks.clear();
-}
-
-void CNodeDefManager::mapNodeboxConnections()
-{
-	for (u32 i = 0; i < m_content_features.size(); i++) {
-		ContentFeatures *f = &m_content_features[i];
-		if ((f->drawtype != NDT_NODEBOX) || (f->node_box.type != NODEBOX_CONNECTED))
-			continue;
-		for (std::vector<std::string>::iterator it = f->connects_to.begin();
-				it != f->connects_to.end(); ++it) {
-			getIds(*it, f->connects_to_ids);
-		}
-	}
-}
-
-bool CNodeDefManager::nodeboxConnects(MapNode from, MapNode to, u8 connect_face)
-{
-	const ContentFeatures &f1 = get(from);
-
-	if ((f1.drawtype != NDT_NODEBOX) || (f1.node_box.type != NODEBOX_CONNECTED))
-		return false;
-
-	// lookup target in connected set
-	if (f1.connects_to_ids.find(to.param0) == f1.connects_to_ids.end())
-		return false;
-
-	const ContentFeatures &f2 = get(to);
-
-	if ((f2.drawtype == NDT_NODEBOX) && (f2.node_box.type == NODEBOX_CONNECTED))
-		// ignores actually looking if back connection exists
-		return (f2.connects_to_ids.find(from.param0) != f2.connects_to_ids.end());
-
-	// does to node declare usable faces?
-	if (f2.connect_sides > 0) {
-		if ((f2.param_type_2 == CPT2_FACEDIR) && (connect_face >= 4)) {
-			static const u8 rot[33 * 4] = {
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				4, 32, 16, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 4 - back
-				8, 4, 32, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 8 - right
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				16, 8, 4, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 16 - front
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				32, 16, 8, 4 // 32 - left
-			};
-			return (f2.connect_sides & rot[(connect_face * 4) + to.param2]);
-		}
-		return (f2.connect_sides & connect_face);
-	}
-	// the target is just a regular node, so connect no matter back connection
-	return true;
-}
-
-////
-//// NodeResolver
-////
-
-NodeResolver::NodeResolver()
-{
-	m_ndef            = NULL;
-	m_nodenames_idx   = 0;
-	m_nnlistsizes_idx = 0;
-	m_resolve_done    = false;
-
-	m_nodenames.reserve(16);
-	m_nnlistsizes.reserve(4);
+	m_ndef = ndef;
+	m_is_node_registration_complete = false;
 }
 
 
 NodeResolver::~NodeResolver()
 {
-	if (!m_resolve_done && m_ndef)
-		m_ndef->cancelNodeResolveCallback(this);
+	while (!m_pending_contents.empty()) {
+		NodeResolveInfo *nri = m_pending_contents.front();
+		m_pending_contents.pop_front();
+		delete nri;
+	}
 }
 
 
-void NodeResolver::nodeResolveInternal()
+int NodeResolver::addNode(const std::string &n_wanted, const std::string &n_alt,
+	content_t c_fallback, content_t *content)
 {
-	m_nodenames_idx   = 0;
-	m_nnlistsizes_idx = 0;
+	if (m_is_node_registration_complete) {
+		if (m_ndef->getId(n_wanted, *content))
+			return NR_STATUS_SUCCESS;
 
-	resolveNodeNames();
-	m_resolve_done = true;
-
-	m_nodenames.clear();
-	m_nnlistsizes.clear();
-}
-
-
-bool NodeResolver::getIdFromNrBacklog(content_t *result_out,
-	const std::string &node_alt, content_t c_fallback)
-{
-	if (m_nodenames_idx == m_nodenames.size()) {
-		*result_out = c_fallback;
-		errorstream << "NodeResolver: no more nodes in list" << std::endl;
-		return false;
-	}
-
-	content_t c;
-	std::string name = m_nodenames[m_nodenames_idx++];
-
-	bool success = m_ndef->getId(name, c);
-	if (!success && node_alt != "") {
-		name = node_alt;
-		success = m_ndef->getId(name, c);
-	}
-
-	if (!success) {
-		errorstream << "NodeResolver: failed to resolve node name '" << name
-			<< "'." << std::endl;
-		c = c_fallback;
-	}
-
-	*result_out = c;
-	return success;
-}
-
-
-bool NodeResolver::getIdsFromNrBacklog(std::vector<content_t> *result_out,
-	bool all_required, content_t c_fallback)
-{
-	bool success = true;
-
-	if (m_nnlistsizes_idx == m_nnlistsizes.size()) {
-		errorstream << "NodeResolver: no more node lists" << std::endl;
-		return false;
-	}
-
-	size_t length = m_nnlistsizes[m_nnlistsizes_idx++];
-
-	while (length--) {
-		if (m_nodenames_idx == m_nodenames.size()) {
-			errorstream << "NodeResolver: no more nodes in list" << std::endl;
-			return false;
+		if (n_alt == "" || !m_ndef->getId(n_alt, *content)) {
+			*content = c_fallback;
+			return NR_STATUS_FAILURE;
 		}
 
-		content_t c;
-		std::string &name = m_nodenames[m_nodenames_idx++];
+		return NR_STATUS_SUCCESS;
+	} else {
+		NodeResolveInfo *nfi = new NodeResolveInfo;
+		nfi->n_wanted   = n_wanted;
+		nfi->n_alt      = n_alt;
+		nfi->c_fallback = c_fallback;
+		nfi->output     = content;
 
-		if (name.substr(0,6) != "group:") {
-			if (m_ndef->getId(name, c)) {
-				result_out->push_back(c);
-			} else if (all_required) {
-				errorstream << "NodeResolver: failed to resolve node name '"
-					<< name << "'." << std::endl;
-				result_out->push_back(c_fallback);
-				success = false;
-			}
-		} else {
-			std::set<content_t> cids;
-			std::set<content_t>::iterator it;
-			m_ndef->getIds(name, cids);
-			for (it = cids.begin(); it != cids.end(); ++it)
-				result_out->push_back(*it);
+		m_pending_contents.push_back(nfi);
+
+		return NR_STATUS_PENDING;
+	}
+}
+
+
+int NodeResolver::addNodeList(const std::string &nodename,
+	std::vector<content_t> *content_vec)
+{
+	if (m_is_node_registration_complete) {
+		std::set<content_t> idset;
+		std::set<content_t>::iterator it;
+
+		m_ndef->getIds(nodename, idset);
+		for (it = idset.begin(); it != idset.end(); ++it)
+			content_vec->push_back(*it);
+
+		return idset.size() ? NR_STATUS_SUCCESS : NR_STATUS_FAILURE;
+	} else {
+		m_pending_content_vecs.push_back(
+			std::make_pair(nodename, content_vec));
+		return NR_STATUS_PENDING;
+	}
+}
+
+
+bool NodeResolver::cancelNode(content_t *content)
+{
+	bool found = false;
+
+	for (std::list<NodeResolveInfo *>::iterator
+			it = m_pending_contents.begin();
+			it != m_pending_contents.end();
+			++it) {
+		NodeResolveInfo *nfi = *it;
+		if (nfi->output == content) {
+			it = m_pending_contents.erase(it);
+			delete nfi;
+			found = true;
 		}
 	}
 
-	return success;
+	return found;
+}
+
+
+int NodeResolver::cancelNodeList(std::vector<content_t> *content_vec)
+{
+	int num_canceled = 0;
+
+	for (ContentVectorResolveList::iterator
+			it = m_pending_content_vecs.begin();
+			it != m_pending_content_vecs.end();
+			++it) {
+		if (it->second == content_vec) {
+			it = m_pending_content_vecs.erase(it);
+			num_canceled++;
+		}
+	}
+
+	return num_canceled;
+}
+
+
+int NodeResolver::resolveNodes()
+{
+	int num_failed = 0;
+
+	//// Resolve pending single node name -> content ID mappings
+	while (!m_pending_contents.empty()) {
+		NodeResolveInfo *nri = m_pending_contents.front();
+		m_pending_contents.pop_front();
+
+		bool success = true;
+		if (!m_ndef->getId(nri->n_wanted, *nri->output)) {
+			success = (nri->n_alt != "") ?
+				m_ndef->getId(nri->n_alt, *nri->output) : false;
+		}
+
+		if (!success) {
+			*nri->output = nri->c_fallback;
+			num_failed++;
+			errorstream << "NodeResolver::resolveNodes():  Failed to "
+				"resolve '" << nri->n_wanted;
+			if (nri->n_alt != "")
+				errorstream << "' and '" << nri->n_alt;
+			errorstream << "'" << std::endl;
+		}
+
+		delete nri;
+	}
+
+	//// Resolve pending node names and add to content_t vector
+	while (!m_pending_content_vecs.empty()) {
+		std::pair<std::string, std::vector<content_t> *> item =
+			m_pending_content_vecs.front();
+		m_pending_content_vecs.pop_front();
+
+		std::string &name = item.first;
+		std::vector<content_t> *output = item.second;
+
+		std::set<content_t> idset;
+		std::set<content_t>::iterator it;
+
+		m_ndef->getIds(name, idset);
+		for (it = idset.begin(); it != idset.end(); ++it)
+			output->push_back(*it);
+
+		if (idset.empty()) {
+			num_failed++;
+			errorstream << "NodeResolver::resolveNodes():  Failed to "
+				"resolve '" << name << "'" << std::endl;
+		}
+	}
+
+	//// Mark node registration as complete so future resolve
+	//// requests are satisfied immediately
+	m_is_node_registration_complete = true;
+
+	return num_failed;
 }

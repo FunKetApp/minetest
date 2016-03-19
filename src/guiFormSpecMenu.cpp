@@ -37,24 +37,21 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include <IGUITabControl.h>
 #include <IGUIComboBox.h>
 #include "log.h"
-#include "client/tile.h" // ITextureSource
+#include "tile.h" // ITextureSource
 #include "hud.h" // drawItemStack
+#include "hex.h"
+#include "util/string.h"
+#include "util/numeric.h"
 #include "filesys.h"
 #include "gettime.h"
 #include "gettext.h"
 #include "scripting_game.h"
 #include "porting.h"
+#include "main.h"
 #include "settings.h"
 #include "client.h"
-#include "fontengine.h"
-#include "util/hex.h"
-#include "util/numeric.h"
 #include "util/string.h" // for parseColorString()
-#include "guiscalingfilter.h"
-
-#if USE_FREETYPE && IRRLICHT_VERSION_MAJOR == 1 && IRRLICHT_VERSION_MINOR < 9
-#include "intlGUIEditBox.h"
-#endif
+#include "fontengine.h"
 
 #define MY_CHECKPOS(a,b)													\
 	if (v_pos.size() != 2) {												\
@@ -77,11 +74,60 @@ static unsigned int font_line_height(gui::IGUIFont *font)
 	return font->getDimension(L"Ay").Height + font->getKerningHeight();
 }
 
+static gui::IGUIFont *select_font_by_line_height(double target_line_height)
+{
+	return g_fontengine->getFont();
+
+/* I have no idea what this is trying to achieve, but scaling the font according
+ * to the size of a formspec/dialog does not seem to be a standard (G)UI
+ * design and AFAIK no existing nor proposed GUI does this. Besides that it:
+ * a) breaks most (current) formspec layouts
+ * b) font sizes change depending on the size of the formspec/dialog (see above)
+ *    meaning that there is no UI consistency
+ * c) the chosen fonts are, in general, probably too large
+ *
+ * Disabling for now.
+ *
+ * FIXME
+ */
+#if 0
+	// We don't get to directly select a font according to its
+	// baseline-to-baseline height.  Rather, we select by em size.
+	// The ratio between these varies between fonts.  The font
+	// engine also takes its size parameter not specified in pixels,
+	// as we want, but scaled by display density and gui_scaling,
+	// so invert that scaling here.  Use a binary search among
+	// requested sizes to find the right font.  Our starting bounds
+	// are an em height of 1 (being careful not to request size 0,
+	// which crashes the freetype system) and an em height of the
+	// target baseline-to-baseline height.
+	unsigned int loreq = ceil(1 / porting::getDisplayDensity()
+				/ g_settings->getFloat("gui_scaling"));
+	unsigned int hireq = ceil(target_line_height
+				/ porting::getDisplayDensity()
+				/ g_settings->getFloat("gui_scaling"));
+	unsigned int lohgt = font_line_height(g_fontengine->getFont(loreq));
+	unsigned int hihgt = font_line_height(g_fontengine->getFont(hireq));
+	while(hireq - loreq > 1 && lohgt != hihgt) {
+		unsigned int nureq = (loreq + hireq) >> 1;
+		unsigned int nuhgt = font_line_height(g_fontengine->getFont(nureq));
+		if(nuhgt < target_line_height) {
+			loreq = nureq;
+			lohgt = nuhgt;
+		} else {
+			hireq = nureq;
+			hihgt = nuhgt;
+		}
+	}
+	return g_fontengine->getFont(target_line_height - lohgt < hihgt - target_line_height ? loreq : hireq);
+#endif
+}
+
 GUIFormSpecMenu::GUIFormSpecMenu(irr::IrrlichtDevice* dev,
 		gui::IGUIElement* parent, s32 id, IMenuManager *menumgr,
 		InventoryManager *invmgr, IGameDef *gamedef,
 		ISimpleTextureSource *tsrc, IFormSource* fsrc, TextDest* tdst,
-		Client* client, bool remap_dbl_click) :
+		Client* client) :
 	GUIModalMenu(dev->getGUIEnvironment(), parent, id, menumgr),
 	m_device(dev),
 	m_invmgr(invmgr),
@@ -100,11 +146,9 @@ GUIFormSpecMenu::GUIFormSpecMenu(irr::IrrlichtDevice* dev,
 	m_form_src(fsrc),
 	m_text_dst(tdst),
 	m_formspec_version(0),
-	m_focused_element(""),
-	m_font(NULL),
-	m_remap_dbl_click(remap_dbl_click)
+	m_font(NULL)
 #ifdef __ANDROID__
-	, m_JavaDialogFieldName("")
+	,m_JavaDialogFieldName(L"")
 #endif
 {
 	current_keys_pending.key_down = false;
@@ -231,7 +275,7 @@ void GUIFormSpecMenu::setInitialFocus()
 		Environment->setFocus(*(children.begin()));
 }
 
-GUITable* GUIFormSpecMenu::getTable(const std::string &tablename)
+GUITable* GUIFormSpecMenu::getTable(std::wstring tablename)
 {
 	for (u32 i = 0; i < m_tables.size(); ++i) {
 		if (tablename == m_tables[i].first.fname)
@@ -240,27 +284,28 @@ GUITable* GUIFormSpecMenu::getTable(const std::string &tablename)
 	return 0;
 }
 
-static std::vector<std::string> split(const std::string &s, char delim)
-{
+std::vector<std::string> split(const std::string &s, char delim) {
 	std::vector<std::string> tokens;
 
 	std::string current = "";
 	bool last_was_escape = false;
-	for (unsigned int i = 0; i < s.size(); i++) {
-		char si = s.c_str()[i];
+	for(unsigned int i=0; i < s.size(); i++) {
 		if (last_was_escape) {
 			current += '\\';
-			current += si;
+			current += s.c_str()[i];
 			last_was_escape = false;
-		} else {
-			if (si == delim) {
+		}
+		else {
+			if (s.c_str()[i] == delim) {
 				tokens.push_back(current);
 				current = "";
 				last_was_escape = false;
-			} else if (si == '\\') {
+			}
+			else if (s.c_str()[i] == '\\'){
 				last_was_escape = true;
-			} else {
-				current += si;
+			}
+			else {
+				current += s.c_str()[i];
 				last_was_escape = false;
 			}
 		}
@@ -300,7 +345,7 @@ void GUIFormSpecMenu::parseSize(parserData* data,std::string element)
 void GUIFormSpecMenu::parseList(parserData* data,std::string element)
 {
 	if (m_gamedef == 0) {
-		warningstream<<"invalid use of 'list' with m_gamedef==0"<<std::endl;
+		errorstream<<"WARNING: invalid use of 'list' with m_gamedef==0"<<std::endl;
 		return;
 	}
 
@@ -345,53 +390,18 @@ void GUIFormSpecMenu::parseList(parserData* data,std::string element)
 		}
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of list without a size[] element"<<std::endl;
+			errorstream<<"WARNING: invalid use of list without a size[] element"<<std::endl;
 		m_inventorylists.push_back(ListDrawSpec(loc, listname, pos, geom, start_i));
 		return;
 	}
 	errorstream<< "Invalid list element(" << parts.size() << "): '" << element << "'"  << std::endl;
 }
 
-void GUIFormSpecMenu::parseListRing(parserData* data, std::string element)
-{
-	if (m_gamedef == 0) {
-		errorstream << "WARNING: invalid use of 'listring' with m_gamedef==0" << std::endl;
-		return;
-	}
-
-	std::vector<std::string> parts = split(element, ';');
-
-	if (parts.size() == 2) {
-		std::string location = parts[0];
-		std::string listname = parts[1];
-
-		InventoryLocation loc;
-
-		if (location == "context" || location == "current_name")
-			loc = m_current_inventory_location;
-		else
-			loc.deSerialize(location);
-
-		m_inventory_rings.push_back(ListRingSpec(loc, listname));
-		return;
-	} else if ((element == "") && (m_inventorylists.size() > 1)) {
-		size_t siz = m_inventorylists.size();
-		// insert the last two inv list elements into the list ring
-		const ListDrawSpec &spa = m_inventorylists[siz - 2];
-		const ListDrawSpec &spb = m_inventorylists[siz - 1];
-		m_inventory_rings.push_back(ListRingSpec(spa.inventoryloc, spa.listname));
-		m_inventory_rings.push_back(ListRingSpec(spb.inventoryloc, spb.listname));
-		return;
-	}
-	errorstream<< "Invalid list ring element(" << parts.size() << ", "
-		<< m_inventorylists.size() << "): '" << element << "'"  << std::endl;
-}
-
 void GUIFormSpecMenu::parseCheckbox(parserData* data,std::string element)
 {
 	std::vector<std::string> parts = split(element,';');
 
-	if (((parts.size() >= 3) && (parts.size() <= 4)) ||
+	if (((parts.size() >= 3) || (parts.size() <= 4)) ||
 		((parts.size() > 4) && (m_formspec_version > FORMSPEC_API_VERSION)))
 	{
 		std::vector<std::string> v_pos = split(parts[0],',');
@@ -413,7 +423,7 @@ void GUIFormSpecMenu::parseCheckbox(parserData* data,std::string element)
 		if (selected == "true")
 			fselected = true;
 
-		std::wstring wlabel = utf8_to_wide(label);
+		std::wstring wlabel = narrow_to_wide(label.c_str());
 
 		core::rect<s32> rect = core::rect<s32>(
 				pos.X, pos.Y + ((imgsize.Y/2) - m_btn_height),
@@ -421,7 +431,7 @@ void GUIFormSpecMenu::parseCheckbox(parserData* data,std::string element)
 				pos.Y + ((imgsize.Y/2) + m_btn_height));
 
 		FieldSpec spec(
-				name,
+				narrow_to_wide(name.c_str()),
 				wlabel, //Needed for displaying text on MSVC
 				wlabel,
 				258+m_fields.size()
@@ -450,7 +460,7 @@ void GUIFormSpecMenu::parseScrollBar(parserData* data, std::string element)
 	if (parts.size() >= 5) {
 		std::vector<std::string> v_pos = split(parts[0],',');
 		std::vector<std::string> v_dim = split(parts[1],',');
-		std::string name = parts[3];
+		std::string name = parts[2];
 		std::string value = parts[4];
 
 		MY_CHECKPOS("scrollbar",0);
@@ -473,7 +483,7 @@ void GUIFormSpecMenu::parseScrollBar(parserData* data, std::string element)
 				core::rect<s32>(pos.X, pos.Y, pos.X + dim.X, pos.Y + dim.Y);
 
 		FieldSpec spec(
-				name,
+				narrow_to_wide(name.c_str()),
 				L"",
 				L"",
 				258+m_fields.size()
@@ -525,7 +535,7 @@ void GUIFormSpecMenu::parseImage(parserData* data,std::string element)
 		geom.Y = stof(v_geom[1]) * (float)imgsize.Y;
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of image without a size[] element"<<std::endl;
+			errorstream<<"WARNING: invalid use of image without a size[] element"<<std::endl;
 		m_images.push_back(ImageDrawSpec(name, pos, geom));
 		return;
 	}
@@ -541,7 +551,7 @@ void GUIFormSpecMenu::parseImage(parserData* data,std::string element)
 		pos.Y += stof(v_pos[1]) * (float) spacing.Y;
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of image without a size[] element"<<std::endl;
+			errorstream<<"WARNING: invalid use of image without a size[] element"<<std::endl;
 		m_images.push_back(ImageDrawSpec(name, pos));
 		return;
 	}
@@ -571,8 +581,8 @@ void GUIFormSpecMenu::parseItemImage(parserData* data,std::string element)
 		geom.Y = stof(v_geom[1]) * (float)imgsize.Y;
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of item_image without a size[] element"<<std::endl;
-		m_itemimages.push_back(ImageDrawSpec("", name, pos, geom));
+			errorstream<<"WARNING: invalid use of item_image without a size[] element"<<std::endl;
+		m_itemimages.push_back(ImageDrawSpec(name, pos, geom));
 		return;
 	}
 	errorstream<< "Invalid ItemImage element(" << parts.size() << "): '" << element << "'"  << std::endl;
@@ -607,14 +617,14 @@ void GUIFormSpecMenu::parseButton(parserData* data,std::string element,
 						pos.X + geom.X, pos.Y + m_btn_height);
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of button without a size[] element"<<std::endl;
+			errorstream<<"WARNING: invalid use of button without a size[] element"<<std::endl;
 
 		label = unescape_string(label);
 
-		std::wstring wlabel = utf8_to_wide(label);
+		std::wstring wlabel = narrow_to_wide(label.c_str());
 
 		FieldSpec spec(
-			name,
+			narrow_to_wide(name.c_str()),
 			wlabel,
 			L"",
 			258+m_fields.size()
@@ -666,7 +676,7 @@ void GUIFormSpecMenu::parseBackground(parserData* data,std::string element)
 		}
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of background without a size[] element"<<std::endl;
+			errorstream<<"WARNING: invalid use of background without a size[] element"<<std::endl;
 		m_backgrounds.push_back(ImageDrawSpec(name, pos, geom));
 		return;
 	}
@@ -736,8 +746,10 @@ void GUIFormSpecMenu::parseTable(parserData* data,std::string element)
 
 		core::rect<s32> rect = core::rect<s32>(pos.X, pos.Y, pos.X+geom.X, pos.Y+geom.Y);
 
+		std::wstring fname_w = narrow_to_wide(name.c_str());
+
 		FieldSpec spec(
-			name,
+			fname_w,
 			L"",
 			L"",
 			258+m_fields.size()
@@ -759,8 +771,8 @@ void GUIFormSpecMenu::parseTable(parserData* data,std::string element)
 
 		e->setTable(data->table_options, data->table_columns, items);
 
-		if (data->table_dyndata.find(name) != data->table_dyndata.end()) {
-			e->setDynamicData(data->table_dyndata[name]);
+		if (data->table_dyndata.find(fname_w) != data->table_dyndata.end()) {
+			e->setDynamicData(data->table_dyndata[fname_w]);
 		}
 
 		if ((str_initial_selection != "") &&
@@ -808,8 +820,10 @@ void GUIFormSpecMenu::parseTextList(parserData* data,std::string element)
 
 		core::rect<s32> rect = core::rect<s32>(pos.X, pos.Y, pos.X+geom.X, pos.Y+geom.Y);
 
+		std::wstring fname_w = narrow_to_wide(name.c_str());
+
 		FieldSpec spec(
-			name,
+			fname_w,
 			L"",
 			L"",
 			258+m_fields.size()
@@ -831,8 +845,8 @@ void GUIFormSpecMenu::parseTextList(parserData* data,std::string element)
 
 		e->setTextList(items, is_yes(str_transparent));
 
-		if (data->table_dyndata.find(name) != data->table_dyndata.end()) {
-			e->setDynamicData(data->table_dyndata[name]);
+		if (data->table_dyndata.find(fname_w) != data->table_dyndata.end()) {
+			e->setDynamicData(data->table_dyndata[fname_w]);
 		}
 
 		if ((str_initial_selection != "") &&
@@ -871,8 +885,10 @@ void GUIFormSpecMenu::parseDropDown(parserData* data,std::string element)
 		core::rect<s32> rect = core::rect<s32>(pos.X, pos.Y,
 				pos.X + width, pos.Y + (m_btn_height * 2));
 
+		std::wstring fname_w = narrow_to_wide(name.c_str());
+
 		FieldSpec spec(
-			name,
+			fname_w,
 			L"",
 			L"",
 			258+m_fields.size()
@@ -889,7 +905,7 @@ void GUIFormSpecMenu::parseDropDown(parserData* data,std::string element)
 		}
 
 		for (unsigned int i=0; i < items.size(); i++) {
-			e->addItem(utf8_to_wide(items[i]).c_str());
+			e->addItem(narrow_to_wide(items[i]).c_str());
 		}
 
 		if (str_initial_selection != "")
@@ -932,10 +948,10 @@ void GUIFormSpecMenu::parsePwdField(parserData* data,std::string element)
 
 		label = unescape_string(label);
 
-		std::wstring wlabel = utf8_to_wide(label);
+		std::wstring wlabel = narrow_to_wide(label.c_str());
 
 		FieldSpec spec(
-			name,
+			narrow_to_wide(name.c_str()),
 			wlabel,
 			L"",
 			258+m_fields.size()
@@ -950,7 +966,7 @@ void GUIFormSpecMenu::parsePwdField(parserData* data,std::string element)
 
 		if (label.length() >= 1)
 		{
-			int font_height = g_fontengine->getTextHeight();
+			int font_height = font_line_height(m_font);
 			rect.UpperLeftCorner.Y -= font_height;
 			rect.LowerRightCorner.Y = rect.UpperLeftCorner.Y + font_height;
 			Environment->addStaticText(spec.flabel.c_str(), rect, false, true, this, 0);
@@ -982,7 +998,7 @@ void GUIFormSpecMenu::parseSimpleField(parserData* data,
 	core::rect<s32> rect;
 
 	if(data->explicit_size)
-		warningstream<<"invalid use of unpositioned \"field\" in inventory"<<std::endl;
+		errorstream<<"WARNING: invalid use of unpositioned \"field\" in inventory"<<std::endl;
 
 	v2s32 pos = padding + AbsoluteRect.UpperLeftCorner;
 	pos.Y = ((m_fields.size()+2)*60);
@@ -998,12 +1014,12 @@ void GUIFormSpecMenu::parseSimpleField(parserData* data,
 	default_val = unescape_string(default_val);
 	label = unescape_string(label);
 
-	std::wstring wlabel = utf8_to_wide(label);
+	std::wstring wlabel = narrow_to_wide(label.c_str());
 
 	FieldSpec spec(
-		name,
+		narrow_to_wide(name.c_str()),
 		wlabel,
-		utf8_to_wide(default_val),
+		narrow_to_wide(default_val.c_str()),
 		258+m_fields.size()
 	);
 
@@ -1015,18 +1031,9 @@ void GUIFormSpecMenu::parseSimpleField(parserData* data,
 	else
 	{
 		spec.send = true;
-		gui::IGUIElement *e;
-#if USE_FREETYPE && IRRLICHT_VERSION_MAJOR == 1 && IRRLICHT_VERSION_MINOR < 9
-		if (g_settings->getBool("freetype")) {
-			e = (gui::IGUIElement *) new gui::intlGUIEditBox(spec.fdefault.c_str(),
-				true, Environment, this, spec.fid, rect);
-			e->drop();
-		} else {
-#else
-		{
-#endif
-			e = Environment->addEditBox(spec.fdefault.c_str(), rect, true, this, spec.fid);
-		}
+		gui::IGUIEditBox *e =
+			Environment->addEditBox(spec.fdefault.c_str(), rect, true, this, spec.fid);
+
 		if (spec.fname == data->focused_fieldname) {
 			Environment->setFocus(e);
 		}
@@ -1042,7 +1049,7 @@ void GUIFormSpecMenu::parseSimpleField(parserData* data,
 
 		if (label.length() >= 1)
 		{
-			int font_height = g_fontengine->getTextHeight();
+			int font_height = font_line_height(m_font);
 			rect.UpperLeftCorner.Y -= font_height;
 			rect.LowerRightCorner.Y = rect.UpperLeftCorner.Y + font_height;
 			Environment->addStaticText(spec.flabel.c_str(), rect, false, true, this, 0);
@@ -1088,7 +1095,7 @@ void GUIFormSpecMenu::parseTextArea(parserData* data,
 	core::rect<s32> rect = core::rect<s32>(pos.X, pos.Y, pos.X+geom.X, pos.Y+geom.Y);
 
 	if(!data->explicit_size)
-		warningstream<<"invalid use of positioned "<<type<<" without a size[] element"<<std::endl;
+		errorstream<<"WARNING: invalid use of positioned "<<type<<" without a size[] element"<<std::endl;
 
 	if(m_form_src)
 		default_val = m_form_src->resolveText(default_val);
@@ -1097,12 +1104,12 @@ void GUIFormSpecMenu::parseTextArea(parserData* data,
 	default_val = unescape_string(default_val);
 	label = unescape_string(label);
 
-	std::wstring wlabel = utf8_to_wide(label);
+	std::wstring wlabel = narrow_to_wide(label.c_str());
 
 	FieldSpec spec(
-		name,
+		narrow_to_wide(name.c_str()),
 		wlabel,
-		utf8_to_wide(default_val),
+		narrow_to_wide(default_val.c_str()),
 		258+m_fields.size()
 	);
 
@@ -1114,19 +1121,8 @@ void GUIFormSpecMenu::parseTextArea(parserData* data,
 	else
 	{
 		spec.send = true;
-
-		gui::IGUIEditBox *e;
-#if USE_FREETYPE && IRRLICHT_VERSION_MAJOR == 1 && IRRLICHT_VERSION_MINOR < 9
-		if (g_settings->getBool("freetype")) {
-			e = (gui::IGUIEditBox *) new gui::intlGUIEditBox(spec.fdefault.c_str(),
-				true, Environment, this, spec.fid, rect);
-			e->drop();
-		} else {
-#else
-		{
-#endif
-			e = Environment->addEditBox(spec.fdefault.c_str(), rect, true, this, spec.fid);
-		}
+		gui::IGUIEditBox *e =
+			Environment->addEditBox(spec.fdefault.c_str(), rect, true, this, spec.fid);
 
 		if (spec.fname == data->focused_fieldname) {
 			Environment->setFocus(e);
@@ -1150,7 +1146,7 @@ void GUIFormSpecMenu::parseTextArea(parserData* data,
 
 		if (label.length() >= 1)
 		{
-			int font_height = g_fontengine->getTextHeight();
+			int font_height = font_line_height(m_font);
 			rect.UpperLeftCorner.Y -= font_height;
 			rect.LowerRightCorner.Y = rect.UpperLeftCorner.Y + font_height;
 			Environment->addStaticText(spec.flabel.c_str(), rect, false, true, this, 0);
@@ -1195,7 +1191,9 @@ void GUIFormSpecMenu::parseLabel(parserData* data,std::string element)
 		pos.Y += (stof(v_pos[1]) + 7.0/30.0) * (float)spacing.Y;
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of label without a size[] element"<<std::endl;
+			errorstream<<"WARNING: invalid use of label without a size[] element"<<std::endl;
+
+		int font_height = font_line_height(m_font);
 
 		text = unescape_string(text);
 		std::vector<std::string> lines = split(text, '\n');
@@ -1211,13 +1209,13 @@ void GUIFormSpecMenu::parseLabel(parserData* data,std::string element)
 			// in the integer cases: 0.4 is not exactly
 			// representable in binary floating point.
 			s32 posy = pos.Y + ((float)i) * spacing.Y * 2.0 / 5.0;
-			std::wstring wlabel = utf8_to_wide(lines[i]);
+			std::wstring wlabel = narrow_to_wide(lines[i].c_str());
 			core::rect<s32> rect = core::rect<s32>(
-				pos.X, posy - m_btn_height,
+				pos.X, posy - font_height,
 				pos.X + m_font->getDimension(wlabel.c_str()).Width,
-				posy + m_btn_height);
+				posy + font_height);
 			FieldSpec spec(
-				"",
+				L"",
 				wlabel,
 				L"",
 				258+m_fields.size()
@@ -1243,7 +1241,7 @@ void GUIFormSpecMenu::parseVertLabel(parserData* data,std::string element)
 		((parts.size() > 2) && (m_formspec_version > FORMSPEC_API_VERSION)))
 	{
 		std::vector<std::string> v_pos = split(parts[0],',');
-		std::wstring text = utf8_to_wide(unescape_string(parts[1]));
+		std::wstring text = narrow_to_wide(unescape_string(parts[1]));
 
 		MY_CHECKPOS("vertlabel",1);
 
@@ -1260,7 +1258,7 @@ void GUIFormSpecMenu::parseVertLabel(parserData* data,std::string element)
 		//actually text.length() would be correct but adding +1 avoids to break all mods
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of label without a size[] element"<<std::endl;
+			errorstream<<"WARNING: invalid use of label without a size[] element"<<std::endl;
 
 		std::wstring label = L"";
 
@@ -1270,7 +1268,7 @@ void GUIFormSpecMenu::parseVertLabel(parserData* data,std::string element)
 		}
 
 		FieldSpec spec(
-			"",
+			L"",
 			label,
 			L"",
 			258+m_fields.size()
@@ -1326,18 +1324,18 @@ void GUIFormSpecMenu::parseImageButton(parserData* data,std::string element,
 		core::rect<s32> rect = core::rect<s32>(pos.X, pos.Y, pos.X+geom.X, pos.Y+geom.Y);
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of image_button without a size[] element"<<std::endl;
+			errorstream<<"WARNING: invalid use of image_button without a size[] element"<<std::endl;
 
 		image_name = unescape_string(image_name);
 		pressed_image_name = unescape_string(pressed_image_name);
 		label = unescape_string(label);
 
-		std::wstring wlabel = utf8_to_wide(label);
+		std::wstring wlabel = narrow_to_wide(label.c_str());
 
 		FieldSpec spec(
-			name,
+			narrow_to_wide(name.c_str()),
 			wlabel,
-			utf8_to_wide(image_name),
+			narrow_to_wide(image_name.c_str()),
 			258+m_fields.size()
 		);
 		spec.ftype = f_Button;
@@ -1359,10 +1357,8 @@ void GUIFormSpecMenu::parseImageButton(parserData* data,std::string element,
 		}
 
 		e->setUseAlphaChannel(true);
-		e->setImage(guiScalingImageButton(
-			Environment->getVideoDriver(), texture, geom.X, geom.Y));
-		e->setPressedImage(guiScalingImageButton(
-			Environment->getVideoDriver(), pressed_texture, geom.X, geom.Y));
+		e->setImage(texture);
+		e->setPressedImage(pressed_texture);
 		e->setScaleImage(true);
 		e->setNotClipped(noclip);
 		e->setDrawBorder(drawborder);
@@ -1399,7 +1395,7 @@ void GUIFormSpecMenu::parseTabHeader(parserData* data,std::string element)
 		}
 
 		FieldSpec spec(
-			name,
+			narrow_to_wide(name.c_str()),
 			L"",
 			L"",
 			258+m_fields.size()
@@ -1429,8 +1425,8 @@ void GUIFormSpecMenu::parseTabHeader(parserData* data,std::string element)
 
 		e->setNotClipped(true);
 
-		for (unsigned int i = 0; i < buttons.size(); i++) {
-			e->addTab(utf8_to_wide(buttons[i]).c_str(), -1);
+		for (unsigned int i=0; i< buttons.size(); i++) {
+			e->addTab(narrow_to_wide(buttons[i]).c_str(), -1);
 		}
 
 		if ((tab_index >= 0) &&
@@ -1449,8 +1445,9 @@ void GUIFormSpecMenu::parseItemImageButton(parserData* data,std::string element)
 {
 
 	if (m_gamedef == 0) {
-		warningstream << "invalid use of item_image_button with m_gamedef==0"
-			<< std::endl;
+		errorstream <<
+				"WARNING: invalid use of item_image_button with m_gamedef==0"
+				<< std::endl;
 		return;
 	}
 
@@ -1478,40 +1475,40 @@ void GUIFormSpecMenu::parseItemImageButton(parserData* data,std::string element)
 		core::rect<s32> rect = core::rect<s32>(pos.X, pos.Y, pos.X+geom.X, pos.Y+geom.Y);
 
 		if(!data->explicit_size)
-			warningstream<<"invalid use of item_image_button without a size[] element"<<std::endl;
+			errorstream<<"WARNING: invalid use of item_image_button without a size[] element"<<std::endl;
 
 		IItemDefManager *idef = m_gamedef->idef();
 		ItemStack item;
 		item.deSerialize(item_name, idef);
+		video::ITexture *texture = idef->getInventoryTexture(item.getDefinition(idef).name, m_gamedef);
 
-		m_tooltips[name] =
-			TooltipSpec(item.getDefinition(idef).description,
+		m_tooltips[narrow_to_wide(name.c_str())] =
+			TooltipSpec (item.getDefinition(idef).description,
 						m_default_tooltip_bgcolor,
 						m_default_tooltip_color);
 
 		label = unescape_string(label);
 		FieldSpec spec(
-			name,
-			utf8_to_wide(label),
-			utf8_to_wide(item_name),
-			258 + m_fields.size()
+			narrow_to_wide(name.c_str()),
+			narrow_to_wide(label.c_str()),
+			narrow_to_wide(item_name.c_str()),
+			258+m_fields.size()
 		);
 
-		gui::IGUIButton *e = Environment->addButton(rect, this, spec.fid, L"");
+		gui::IGUIButton *e = Environment->addButton(rect, this, spec.fid, spec.flabel.c_str());
 
 		if (spec.fname == data->focused_fieldname) {
 			Environment->setFocus(e);
 		}
 
+		e->setUseAlphaChannel(true);
+		e->setImage(texture);
+		e->setPressedImage(texture);
+		e->setScaleImage(true);
 		spec.ftype = f_Button;
 		rect+=data->basepos-padding;
 		spec.rect=rect;
 		m_fields.push_back(spec);
-		pos = padding + AbsoluteRect.UpperLeftCorner;
-		pos.X += stof(v_pos[0]) * (float) spacing.X;
-		pos.Y += stof(v_pos[1]) * (float) spacing.Y;
-		m_itemimages.push_back(ImageDrawSpec("", item_name, e, pos, geom));
-		m_static_texts.push_back(StaticTextSpec(utf8_to_wide(label), rect, e));
 		return;
 	}
 	errorstream<< "Invalid ItemImagebutton element(" << parts.size() << "): '" << element << "'"  << std::endl;
@@ -1604,15 +1601,13 @@ void GUIFormSpecMenu::parseTooltip(parserData* data, std::string element)
 	std::vector<std::string> parts = split(element,';');
 	if (parts.size() == 2) {
 		std::string name = parts[0];
-		m_tooltips[name] = TooltipSpec(unescape_string(parts[1]),
-			m_default_tooltip_bgcolor, m_default_tooltip_color);
+		m_tooltips[narrow_to_wide(name.c_str())] = TooltipSpec (parts[1], m_default_tooltip_bgcolor, m_default_tooltip_color);
 		return;
 	} else if (parts.size() == 4) {
 		std::string name = parts[0];
 		video::SColor tmp_color1, tmp_color2;
 		if ( parseColorString(parts[2], tmp_color1, false) && parseColorString(parts[3], tmp_color2, false) ) {
-			m_tooltips[name] = TooltipSpec(unescape_string(parts[1]),
-				tmp_color1, tmp_color2);
+			m_tooltips[narrow_to_wide(name.c_str())] = TooltipSpec (parts[1], tmp_color1, tmp_color2);
 			return;
 		}
 	}
@@ -1694,11 +1689,6 @@ void GUIFormSpecMenu::parseElement(parserData* data, std::string element)
 
 	if (type == "list") {
 		parseList(data,description);
-		return;
-	}
-
-	if (type == "listring") {
-		parseListRing(data, description);
 		return;
 	}
 
@@ -1818,6 +1808,8 @@ void GUIFormSpecMenu::parseElement(parserData* data, std::string element)
 		<<std::endl;
 }
 
+
+
 void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
 {
 	/* useless to regenerate without a screensize */
@@ -1829,14 +1821,10 @@ void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
 
 	//preserve tables
 	for (u32 i = 0; i < m_tables.size(); ++i) {
-		std::string tablename = m_tables[i].first.fname;
+		std::wstring tablename = m_tables[i].first.fname;
 		GUITable *table = m_tables[i].second;
 		mydata.table_dyndata[tablename] = table->getDynamicData();
 	}
-
-	//set focus
-	if (!m_focused_element.empty())
-		mydata.focused_fieldname = m_focused_element;
 
 	//preserve focus
 	gui::IGUIElement *focused_element = Environment->getFocus();
@@ -1879,8 +1867,6 @@ void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
 	m_fields.clear();
 	m_boxes.clear();
 	m_tooltips.clear();
-	m_inventory_rings.clear();
-	m_static_texts.clear();
 
 	// Set default values (fits old formspec values)
 	m_bgcolor = video::SColor(140,0,0,0);
@@ -1965,7 +1951,7 @@ void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
 			// wide, including border) just fit into the
 			// default window (800 pixels wide) at 96 DPI
 			// and default scaling (1.00).
-			use_imgsize = 0.5555 * screen_dpi * gui_scaling;
+			use_imgsize = 0.53 * screen_dpi * gui_scaling;
 		} else {
 			// In variable-size mode, we prefer to make the
 			// inventory image size 1/15 of screen height,
@@ -2004,9 +1990,10 @@ void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
 		imgsize = v2s32(use_imgsize, use_imgsize);
 		spacing = v2s32(use_imgsize*5.0/4, use_imgsize*15.0/13);
 		padding = v2s32(use_imgsize*3.0/8, use_imgsize*3.0/8);
+		double target_font_height = use_imgsize*15.0/13 * 0.4;
 		m_btn_height = use_imgsize*15.0/13 * 0.35;
 
-		m_font = g_fontengine->getFont();
+		m_font = select_font_by_line_height(target_font_height);
 
 		mydata.size = v2s32(
 			padding.X*2+spacing.X*(mydata.invsize.X-1.0)+imgsize.X,
@@ -2036,7 +2023,7 @@ void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
 	m_tooltip_element->setOverrideFont(m_font);
 
 	gui::IGUISkin* skin = Environment->getSkin();
-	sanity_check(skin != NULL);
+	assert(skin != NULL);
 	gui::IGUIFont *old_font = skin->getFont();
 	skin->setFont(m_font);
 
@@ -2065,7 +2052,7 @@ void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
 			mydata.rect =
 					core::rect<s32>(size.X/2-70, pos.Y,
 							(size.X/2-70)+140, pos.Y + (m_btn_height*2));
-			const wchar_t *text = wgettext("Proceed");
+			wchar_t* text = wgettext("Proceed");
 			Environment->addButton(mydata.rect, this, 257, text);
 			delete[] text;
 		}
@@ -2086,7 +2073,7 @@ void GUIFormSpecMenu::regenerateGui(v2u32 screensize)
 bool GUIFormSpecMenu::getAndroidUIInput()
 {
 	/* no dialog shown */
-	if (m_JavaDialogFieldName == "") {
+	if (m_JavaDialogFieldName == L"") {
 		return false;
 	}
 
@@ -2095,8 +2082,8 @@ bool GUIFormSpecMenu::getAndroidUIInput()
 		return true;
 	}
 
-	std::string fieldname = m_JavaDialogFieldName;
-	m_JavaDialogFieldName = "";
+	std::wstring fieldname = m_JavaDialogFieldName;
+	m_JavaDialogFieldName = L"";
 
 	/* no value abort dialog processing */
 	if (porting::getInputDialogState() != 0) {
@@ -2104,7 +2091,7 @@ bool GUIFormSpecMenu::getAndroidUIInput()
 	}
 
 	for(std::vector<FieldSpec>::iterator iter =  m_fields.begin();
-			iter != m_fields.end(); ++iter) {
+			iter != m_fields.end(); iter++) {
 
 		if (iter->fname != fieldname) {
 			continue;
@@ -2122,7 +2109,7 @@ bool GUIFormSpecMenu::getAndroidUIInput()
 		std::string text = porting::getInputDialogValue();
 
 		((gui::IGUIEditBox*) tochange)->
-			setText(utf8_to_wide(text).c_str());
+			setText(narrow_to_wide(text).c_str());
 	}
 	return false;
 }
@@ -2152,14 +2139,13 @@ GUIFormSpecMenu::ItemSpec GUIFormSpecMenu::getItemAtPos(v2s32 p) const
 	return ItemSpec(InventoryLocation(), "", -1);
 }
 
-void GUIFormSpecMenu::drawList(const ListDrawSpec &s, int phase,
-		bool &item_hovered)
+void GUIFormSpecMenu::drawList(const ListDrawSpec &s, int phase)
 {
 	video::IVideoDriver* driver = Environment->getVideoDriver();
 
 	Inventory *inv = m_invmgr->getInventory(s.inventoryloc);
 	if(!inv){
-		warningstream<<"GUIFormSpecMenu::drawList(): "
+		infostream<<"GUIFormSpecMenu::drawList(): WARNING: "
 				<<"The inventory location "
 				<<"\""<<s.inventoryloc.dump()<<"\" doesn't exist"
 				<<std::endl;
@@ -2167,7 +2153,7 @@ void GUIFormSpecMenu::drawList(const ListDrawSpec &s, int phase,
 	}
 	InventoryList *ilist = inv->getList(s.listname);
 	if(!ilist){
-		warningstream<<"GUIFormSpecMenu::drawList(): "
+		infostream<<"GUIFormSpecMenu::drawList(): WARNING: "
 				<<"The inventory list \""<<s.listname<<"\" @ \""
 				<<s.inventoryloc.dump()<<"\" doesn't exist"
 				<<std::endl;
@@ -2194,16 +2180,13 @@ void GUIFormSpecMenu::drawList(const ListDrawSpec &s, int phase,
 			&& m_selected_item->listname == s.listname
 			&& m_selected_item->i == item_i;
 		bool hovering = rect.isPointInside(m_pointer);
-		ItemRotationKind rotation_kind = selected ? IT_ROT_SELECTED :
-			(hovering ? IT_ROT_HOVERED : IT_ROT_NONE);
 
-		if (phase == 0) {
-			if (hovering) {
-				item_hovered = true;
+		if(phase == 0)
+		{
+			if(hovering)
 				driver->draw2DRectangle(m_slotbg_h, rect, &AbsoluteClippingRect);
-			} else {
+			else
 				driver->draw2DRectangle(m_slotbg_n, rect, &AbsoluteClippingRect);
-			}
 		}
 
 		//Draw inv slot borders
@@ -2237,8 +2220,7 @@ void GUIFormSpecMenu::drawList(const ListDrawSpec &s, int phase,
 			if(!item.empty())
 			{
 				drawItemStack(driver, m_font, item,
-					rect, &AbsoluteClippingRect, m_gamedef,
-					rotation_kind);
+						rect, &AbsoluteClippingRect, m_gamedef);
 			}
 
 			// Draw tooltip
@@ -2251,7 +2233,7 @@ void GUIFormSpecMenu::drawList(const ListDrawSpec &s, int phase,
 				m_tooltip_element->setOverrideColor(m_default_tooltip_color);
 				m_tooltip_element->setVisible(true);
 				this->bringToFront(m_tooltip_element);
-				m_tooltip_element->setText(utf8_to_wide(tooltip_text).c_str());
+				m_tooltip_element->setText(narrow_to_wide(tooltip_text).c_str());
 				s32 tooltip_width = m_tooltip_element->getTextWidth() + m_btn_height;
 				s32 tooltip_height = m_tooltip_element->getTextHeight() * tt_rows.size() + 5;
 				v2u32 screenSize = driver->getScreenSize();
@@ -2279,25 +2261,21 @@ void GUIFormSpecMenu::drawList(const ListDrawSpec &s, int phase,
 
 void GUIFormSpecMenu::drawSelectedItem()
 {
+	if(!m_selected_item)
+		return;
+
 	video::IVideoDriver* driver = Environment->getVideoDriver();
 
-	if (!m_selected_item) {
-		drawItemStack(driver, m_font, ItemStack(),
-			core::rect<s32>(v2s32(0, 0), v2s32(0, 0)),
-			NULL, m_gamedef, IT_ROT_DRAGGED);
-		return;
-	}
-
 	Inventory *inv = m_invmgr->getInventory(m_selected_item->inventoryloc);
-	sanity_check(inv);
+	assert(inv);
 	InventoryList *list = inv->getList(m_selected_item->listname);
-	sanity_check(list);
+	assert(list);
 	ItemStack stack = list->getItem(m_selected_item->i);
 	stack.count = m_selected_amount;
 
 	core::rect<s32> imgrect(0,0,imgsize.X,imgsize.Y);
 	core::rect<s32> rect = imgrect + (m_pointer - imgrect.getCenter());
-	drawItemStack(driver, m_font, stack, rect, NULL, m_gamedef, IT_ROT_DRAGGED);
+	drawItemStack(driver, m_font, stack, rect, NULL, m_gamedef);
 }
 
 void GUIFormSpecMenu::drawMenu()
@@ -2311,7 +2289,7 @@ void GUIFormSpecMenu::drawMenu()
 	}
 
 	gui::IGUISkin* skin = Environment->getSkin();
-	sanity_check(skin != NULL);
+	assert(skin != NULL);
 	gui::IGUIFont *old_font = skin->getFont();
 	skin->setFont(m_font);
 
@@ -2352,7 +2330,7 @@ void GUIFormSpecMenu::drawMenu()
 
 			const video::SColor color(255,255,255,255);
 			const video::SColor colors[] = {color,color,color,color};
-			draw2DImageFilterScaled(driver, texture, rect,
+			driver->draw2DImage(texture, rect,
 				core::rect<s32>(core::position2d<s32>(0,0),
 						core::dimension2di(texture->getOriginalSize())),
 				NULL/*&AbsoluteClippingRect*/, colors, true);
@@ -2379,12 +2357,6 @@ void GUIFormSpecMenu::drawMenu()
 
 		driver->draw2DRectangle(todraw, rect, 0);
 	}
-
-	/*
-		Call base class
-	*/
-	gui::IGUIElement::draw();
-
 	/*
 		Draw images
 	*/
@@ -2408,7 +2380,7 @@ void GUIFormSpecMenu::drawMenu()
 			core::rect<s32> rect = imgrect + spec.pos;
 			const video::SColor color(255,255,255,255);
 			const video::SColor colors[] = {color,color,color,color};
-			draw2DImageFilterScaled(driver, texture, rect,
+			driver->draw2DImage(texture, rect,
 				core::rect<s32>(core::position2d<s32>(0,0),img_origsize),
 				NULL/*&AbsoluteClippingRect*/, colors, true);
 		}
@@ -2429,22 +2401,18 @@ void GUIFormSpecMenu::drawMenu()
 		const ImageDrawSpec &spec = m_itemimages[i];
 		IItemDefManager *idef = m_gamedef->idef();
 		ItemStack item;
-		item.deSerialize(spec.item_name, idef);
+		item.deSerialize(spec.name, idef);
+		video::ITexture *texture = idef->getInventoryTexture(item.getDefinition(idef).name, m_gamedef);
+		// Image size on screen
 		core::rect<s32> imgrect(0, 0, spec.geom.X, spec.geom.Y);
-		// Viewport rectangle on screen
+		// Image rectangle on screen
 		core::rect<s32> rect = imgrect + spec.pos;
-		if (spec.parent_button && spec.parent_button->isPressed()) {
-#if (IRRLICHT_VERSION_MAJOR == 1 && IRRLICHT_VERSION_MINOR < 8)
-			rect += core::dimension2d<s32>(
-				0.05 * (float)rect.getWidth(), 0.05 * (float)rect.getHeight());
-#else
-			rect += core::dimension2d<s32>(
-				skin->getSize(irr::gui::EGDS_BUTTON_PRESSED_IMAGE_OFFSET_X),
-				skin->getSize(irr::gui::EGDS_BUTTON_PRESSED_IMAGE_OFFSET_Y));
-#endif
-		}
-		drawItemStack(driver, m_font, item, rect, &AbsoluteClippingRect,
-				m_gamedef, IT_ROT_NONE);
+		const video::SColor color(255,255,255,255);
+		const video::SColor colors[] = {color,color,color,color};
+		driver->draw2DImage(texture, rect,
+			core::rect<s32>(core::position2d<s32>(0,0),
+					core::dimension2di(texture->getOriginalSize())),
+			NULL/*&AbsoluteClippingRect*/, colors, true);
 	}
 
 	/*
@@ -2452,45 +2420,22 @@ void GUIFormSpecMenu::drawMenu()
 		Phase 0: Item slot rectangles
 		Phase 1: Item images; prepare tooltip
 	*/
-	bool item_hovered = false;
-	int start_phase = 0;
-	for (int phase = start_phase; phase <= 1; phase++) {
-		for (u32 i = 0; i < m_inventorylists.size(); i++) {
-			drawList(m_inventorylists[i], phase, item_hovered);
-		}
+	int start_phase=0;
+	for(int phase=start_phase; phase<=1; phase++)
+	for(u32 i=0; i<m_inventorylists.size(); i++)
+	{
+		drawList(m_inventorylists[i], phase);
 	}
-	if (!item_hovered) {
-		drawItemStack(driver, m_font, ItemStack(),
-			core::rect<s32>(v2s32(0, 0), v2s32(0, 0)),
-			NULL, m_gamedef, IT_ROT_HOVERED);
-	}
+
+	/*
+		Call base class
+	*/
+	gui::IGUIElement::draw();
 
 /* TODO find way to show tooltips on touchscreen */
 #ifndef HAVE_TOUCHSCREENGUI
 	m_pointer = m_device->getCursorControl()->getPosition();
 #endif
-
-	/*
-		Draw static text elements
-	*/
-	for (u32 i = 0; i < m_static_texts.size(); i++) {
-		const StaticTextSpec &spec = m_static_texts[i];	
-		core::rect<s32> rect = spec.rect;
-		if (spec.parent_button && spec.parent_button->isPressed()) {
-#if (IRRLICHT_VERSION_MAJOR == 1 && IRRLICHT_VERSION_MINOR < 8)
-			rect += core::dimension2d<s32>(
-				0.05 * (float)rect.getWidth(), 0.05 * (float)rect.getHeight());
-#else
-			// Use image offset instead of text's because its a bit smaller
-			// and fits better, also TEXT_OFFSET_X is always 0
-			rect += core::dimension2d<s32>(
-				skin->getSize(irr::gui::EGDS_BUTTON_PRESSED_IMAGE_OFFSET_X),
-				skin->getSize(irr::gui::EGDS_BUTTON_PRESSED_IMAGE_OFFSET_Y));
-#endif
-		}
-		video::SColor color(255, 255, 255, 255);
-		m_font->draw(spec.text.c_str(), rect, color, true, true, &rect);
-	}
 
 	/*
 		Draw fields/buttons tooltips
@@ -2516,11 +2461,11 @@ void GUIFormSpecMenu::drawMenu()
 
 		if (id != -1 && delta >= m_tooltip_show_delay) {
 			for(std::vector<FieldSpec>::iterator iter =  m_fields.begin();
-					iter != m_fields.end(); ++iter) {
+					iter != m_fields.end(); iter++) {
 				if ( (iter->fid == id) && (m_tooltips[iter->fname].tooltip != "") ){
 					if (m_old_tooltip != m_tooltips[iter->fname].tooltip) {
 						m_old_tooltip = m_tooltips[iter->fname].tooltip;
-						m_tooltip_element->setText(utf8_to_wide(m_tooltips[iter->fname].tooltip).c_str());
+						m_tooltip_element->setText(narrow_to_wide(m_tooltips[iter->fname].tooltip).c_str());
 						std::vector<std::string> tt_rows = str_split(m_tooltips[iter->fname].tooltip, '\n');
 						s32 tooltip_width = m_tooltip_element->getTextWidth() + m_btn_height;
 						s32 tooltip_height = m_tooltip_element->getTextHeight() * tt_rows.size() + 5;
@@ -2679,7 +2624,7 @@ void GUIFormSpecMenu::acceptInput(FormspecQuitMode quitmode=quit_mode_no)
 {
 	if(m_text_dst)
 	{
-		StringMap fields;
+		std::map<std::string, std::string> fields;
 
 		if (quitmode == quit_mode_accept) {
 			fields["quit"] = "true";
@@ -2714,10 +2659,11 @@ void GUIFormSpecMenu::acceptInput(FormspecQuitMode quitmode=quit_mode_no)
 		for(unsigned int i=0; i<m_fields.size(); i++) {
 			const FieldSpec &s = m_fields[i];
 			if(s.send) {
-				std::string name = s.fname;
-				if (s.ftype == f_Button) {
-					fields[name] = wide_to_utf8(s.flabel);
-				} else if (s.ftype == f_Table) {
+				std::string name  = wide_to_narrow(s.fname);
+				if(s.ftype == f_Button) {
+					fields[name] = wide_to_narrow(s.flabel);
+				}
+				else if(s.ftype == f_Table) {
 					GUITable *table = getTable(s.fname);
 					if (table) {
 						fields[name] = table->checkEvent();
@@ -2734,7 +2680,7 @@ void GUIFormSpecMenu::acceptInput(FormspecQuitMode quitmode=quit_mode_no)
 					s32 selected = e->getSelected();
 					if (selected >= 0) {
 						fields[name] =
-							wide_to_utf8(e->getItem(selected));
+							wide_to_narrow(e->getItem(selected));
 					}
 				}
 				else if (s.ftype == f_TabHeader) {
@@ -2790,7 +2736,7 @@ void GUIFormSpecMenu::acceptInput(FormspecQuitMode quitmode=quit_mode_no)
 				{
 					IGUIElement* e = getElementFromId(s.fid);
 					if(e != NULL) {
-						fields[name] = wide_to_utf8(e->getText());
+						fields[name] = wide_to_narrow(e->getText());
 					}
 				}
 			}
@@ -2829,7 +2775,7 @@ bool GUIFormSpecMenu::preprocessEvent(const SEvent& event)
 		if (hovered && isMyChild(hovered) &&
 				hovered->getType() == gui::EGUIET_TAB_CONTROL) {
 			gui::IGUISkin* skin = Environment->getSkin();
-			sanity_check(skin != NULL);
+			assert(skin != NULL);
 			gui::IGUIFont *old_font = skin->getFont();
 			skin->setFont(m_font);
 			bool retval = hovered->OnEvent(event);
@@ -2898,7 +2844,7 @@ bool GUIFormSpecMenu::preprocessEvent(const SEvent& event)
 			}
 			m_JavaDialogFieldName = getNameByID(hovered->getID());
 			std::string message   = gettext("Enter ");
-			std::string label     = wide_to_utf8(getLabelByID(hovered->getID()));
+			std::string label     = wide_to_narrow(getLabelByID(hovered->getID()));
 			if (label == "") {
 				label = "text";
 			}
@@ -2918,7 +2864,7 @@ bool GUIFormSpecMenu::preprocessEvent(const SEvent& event)
 			}
 
 			porting::showInputDialog(gettext("ok"), "",
-					wide_to_utf8(((gui::IGUIEditBox*) hovered)->getText()),
+					wide_to_narrow(((gui::IGUIEditBox*) hovered)->getText()),
 					type);
 			return retval;
 		}
@@ -3040,19 +2986,6 @@ bool GUIFormSpecMenu::preprocessEvent(const SEvent& event)
 /******************************************************************************/
 bool GUIFormSpecMenu::DoubleClickDetection(const SEvent event)
 {
-	/* The following code is for capturing double-clicks of the mouse button
-	 * and translating the double-click into an EET_KEY_INPUT_EVENT event
-	 * -- which closes the form -- under some circumstances.
-	 *
-	 * There have been many github issues reporting this as a bug even though it
-	 * was an intended feature.  For this reason, remapping the double-click as
-	 * an ESC must be explicitly set when creating this class via the
-	 * /p remap_dbl_click parameter of the constructor.
-	 */
-
-	if (!m_remap_dbl_click)
-		return false;
-
 	if (event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN) {
 		m_doubleclickdetect[0].pos  = m_doubleclickdetect[1].pos;
 		m_doubleclickdetect[0].time = m_doubleclickdetect[1].time;
@@ -3091,27 +3024,26 @@ bool GUIFormSpecMenu::DoubleClickDetection(const SEvent event)
 		delete translated;
 		return true;
 	}
-
 	return false;
 }
 
 bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 {
-	if (event.EventType==EET_KEY_INPUT_EVENT) {
+	if(event.EventType==EET_KEY_INPUT_EVENT) {
 		KeyPress kp(event.KeyInput);
 		if (event.KeyInput.PressedDown && ( (kp == EscapeKey) ||
-				(kp == getKeySetting("keymap_inventory")) || (kp == CancelKey))) {
+			(kp == getKeySetting("keymap_inventory")) || (kp == CancelKey))) {
 			if (m_allowclose) {
 				doPause = false;
 				acceptInput(quit_mode_cancel);
 				quitMenu();
 			} else {
-				m_text_dst->gotText(L"MenuQuit");
+				m_text_dst->gotText(narrow_to_wide("MenuQuit"));
 			}
 			return true;
 		} else if (m_client != NULL && event.KeyInput.PressedDown &&
-				(kp == getKeySetting("keymap_screenshot"))) {
-			m_client->makeScreenshot(m_device);
+			(kp == getKeySetting("keymap_screenshot"))) {
+				m_client->makeScreenshot(m_device);
 		}
 		if (event.KeyInput.PressedDown &&
 			(event.KeyInput.Key==KEY_RETURN ||
@@ -3131,7 +3063,7 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 				break;
 				default:
 					//can't happen at all!
-					FATAL_ERROR("Reached a source line that can't ever been reached");
+					assert("reached a source line that can't ever been reached" == 0);
 					break;
 			}
 			if (current_keys_pending.key_enter && m_allowclose) {
@@ -3162,45 +3094,44 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 
 		Inventory *inv_selected = NULL;
 		Inventory *inv_s = NULL;
-		InventoryList *list_s = NULL;
 
-		if (m_selected_item) {
+		if(m_selected_item) {
 			inv_selected = m_invmgr->getInventory(m_selected_item->inventoryloc);
-			sanity_check(inv_selected);
-			sanity_check(inv_selected->getList(m_selected_item->listname) != NULL);
+			assert(inv_selected);
+			assert(inv_selected->getList(m_selected_item->listname) != NULL);
 		}
 
 		u32 s_count = 0;
 
-		if (s.isValid())
+		if(s.isValid())
 		do { // breakable
 			inv_s = m_invmgr->getInventory(s.inventoryloc);
 
-			if (!inv_s) {
-				errorstream << "InventoryMenu: The selected inventory location "
-						<< "\"" << s.inventoryloc.dump() << "\" doesn't exist"
-						<< std::endl;
+			if(!inv_s) {
+				errorstream<<"InventoryMenu: The selected inventory location "
+						<<"\""<<s.inventoryloc.dump()<<"\" doesn't exist"
+						<<std::endl;
 				s.i = -1;  // make it invalid again
 				break;
 			}
 
-			list_s = inv_s->getList(s.listname);
-			if (list_s == NULL) {
-				verbosestream << "InventoryMenu: The selected inventory list \""
-						<< s.listname << "\" does not exist" << std::endl;
+			InventoryList *list = inv_s->getList(s.listname);
+			if(list == NULL) {
+				verbosestream<<"InventoryMenu: The selected inventory list \""
+						<<s.listname<<"\" does not exist"<<std::endl;
 				s.i = -1;  // make it invalid again
 				break;
 			}
 
-			if ((u32)s.i >= list_s->getSize()) {
-				infostream << "InventoryMenu: The selected inventory list \""
-						<< s.listname << "\" is too small (i=" << s.i << ", size="
-						<< list_s->getSize() << ")" << std::endl;
+			if((u32)s.i >= list->getSize()) {
+				infostream<<"InventoryMenu: The selected inventory list \""
+						<<s.listname<<"\" is too small (i="<<s.i<<", size="
+						<<list->getSize()<<")"<<std::endl;
 				s.i = -1;  // make it invalid again
 				break;
 			}
 
-			s_count = list_s->getItem(s.i).count;
+			s_count = list->getItem(s.i).count;
 		} while(0);
 
 		bool identical = (m_selected_item != NULL) && s.isValid() &&
@@ -3212,28 +3143,24 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 		// up/down: 0 = down (press), 1 = up (release), 2 = unknown event, -1 movement
 		int button = 0;
 		int updown = 2;
-		if (event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN)
+		if(event.MouseInput.Event == EMIE_LMOUSE_PRESSED_DOWN)
 			{ button = 0; updown = 0; }
-		else if (event.MouseInput.Event == EMIE_RMOUSE_PRESSED_DOWN)
+		else if(event.MouseInput.Event == EMIE_RMOUSE_PRESSED_DOWN)
 			{ button = 1; updown = 0; }
-		else if (event.MouseInput.Event == EMIE_MMOUSE_PRESSED_DOWN)
+		else if(event.MouseInput.Event == EMIE_MMOUSE_PRESSED_DOWN)
 			{ button = 2; updown = 0; }
-		else if (event.MouseInput.Event == EMIE_LMOUSE_LEFT_UP)
+		else if(event.MouseInput.Event == EMIE_LMOUSE_LEFT_UP)
 			{ button = 0; updown = 1; }
-		else if (event.MouseInput.Event == EMIE_RMOUSE_LEFT_UP)
+		else if(event.MouseInput.Event == EMIE_RMOUSE_LEFT_UP)
 			{ button = 1; updown = 1; }
-		else if (event.MouseInput.Event == EMIE_MMOUSE_LEFT_UP)
+		else if(event.MouseInput.Event == EMIE_MMOUSE_LEFT_UP)
 			{ button = 2; updown = 1; }
-		else if (event.MouseInput.Event == EMIE_MOUSE_MOVED)
+		else if(event.MouseInput.Event == EMIE_MOUSE_MOVED)
 			{ updown = -1;}
 
 		// Set this number to a positive value to generate a move action
 		// from m_selected_item to s.
 		u32 move_amount = 0;
-
-		// Set this number to a positive value to generate a move action
-		// from s to the next inventory ring.
-		u32 shift_move_amount = 0;
 
 		// Set this number to a positive value to generate a drop action
 		// from m_selected_item.
@@ -3242,7 +3169,7 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 		// Set this number to a positive value to generate a craft action at s.
 		u32 craft_amount = 0;
 
-		if (updown == 0) {
+		if(updown == 0) {
 			// Some mouse button has been pressed
 
 			//infostream<<"Mouse button "<<button<<" pressed at p=("
@@ -3250,49 +3177,40 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 
 			m_selected_dragging = false;
 
-			if (s.isValid() && s.listname == "craftpreview") {
+			if(s.isValid() && s.listname == "craftpreview") {
 				// Craft preview has been clicked: craft
 				craft_amount = (button == 2 ? 10 : 1);
-			} else if (m_selected_item == NULL) {
-				if (s_count != 0) {
-					// Non-empty stack has been clicked: select or shift-move it
+			}
+			else if(m_selected_item == NULL) {
+				if(s_count != 0) {
+					// Non-empty stack has been clicked: select it
 					m_selected_item = new ItemSpec(s);
 
-					u32 count;
-					if (button == 1)  // right
-						count = (s_count + 1) / 2;
-					else if (button == 2)  // middle
-						count = MYMIN(s_count, 10);
+					if(button == 1)  // right
+						m_selected_amount = (s_count + 1) / 2;
+					else if(button == 2)  // middle
+						m_selected_amount = MYMIN(s_count, 10);
 					else  // left
-						count = s_count;
+						m_selected_amount = s_count;
 
-					if (!event.MouseInput.Shift) {
-						// no shift: select item
-						m_selected_amount = count;
-						m_selected_dragging = true;
-						m_rmouse_auto_place = false;
-					} else {
-						// shift pressed: move item
-						if (button != 1)
-							shift_move_amount = count;
-						else // count of 1 at left click like after drag & drop
-							shift_move_amount = 1;
-					}
+					m_selected_dragging = true;
+					m_rmouse_auto_place = false;
 				}
-			} else { // m_selected_item != NULL
+			}
+			else { // m_selected_item != NULL
 				assert(m_selected_amount >= 1);
 
-				if (s.isValid()) {
+				if(s.isValid()) {
 					// Clicked a slot: move
-					if (button == 1)  // right
+					if(button == 1)  // right
 						move_amount = 1;
-					else if (button == 2)  // middle
+					else if(button == 2)  // middle
 						move_amount = MYMIN(m_selected_amount, 10);
 					else  // left
 						move_amount = m_selected_amount;
 
-					if (identical) {
-						if (move_amount >= m_selected_amount)
+					if(identical) {
+						if(move_amount >= m_selected_amount)
 							m_selected_amount = 0;
 						else
 							m_selected_amount -= move_amount;
@@ -3301,28 +3219,29 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 				}
 				else if (!getAbsoluteClippingRect().isPointInside(m_pointer)) {
 					// Clicked outside of the window: drop
-					if (button == 1)  // right
+					if(button == 1)  // right
 						drop_amount = 1;
-					else if (button == 2)  // middle
+					else if(button == 2)  // middle
 						drop_amount = MYMIN(m_selected_amount, 10);
 					else  // left
 						drop_amount = m_selected_amount;
 				}
 			}
 		}
-		else if (updown == 1) {
+		else if(updown == 1) {
 			// Some mouse button has been released
 
 			//infostream<<"Mouse button "<<button<<" released at p=("
 			//	<<p.X<<","<<p.Y<<")"<<std::endl;
 
-			if (m_selected_item != NULL && m_selected_dragging && s.isValid()) {
-				if (!identical) {
+			if(m_selected_item != NULL && m_selected_dragging && s.isValid()) {
+				if(!identical) {
 					// Dragged to different slot: move all selected
 					move_amount = m_selected_amount;
 				}
-			} else if (m_selected_item != NULL && m_selected_dragging &&
-					!(getAbsoluteClippingRect().isPointInside(m_pointer))) {
+			}
+			else if(m_selected_item != NULL && m_selected_dragging &&
+				!(getAbsoluteClippingRect().isPointInside(m_pointer))) {
 				// Dragged outside of window: drop all selected
 				drop_amount = m_selected_amount;
 			}
@@ -3331,13 +3250,14 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 			// Keep count of how many times right mouse button has been
 			// clicked. One click is drag without dropping. Click + release
 			// + click changes to drop one item when moved mode
-			if (button == 1 && m_selected_item != NULL)
+			if(button == 1 && m_selected_item != NULL)
 				m_rmouse_auto_place = !m_rmouse_auto_place;
-		} else if (updown == -1) {
+		}
+		else if(updown == -1) {
 			// Mouse has been moved and rmb is down and mouse pointer just
 			// entered a new inventory field (checked in the entry-if, this
 			// is the only action here that is generated by mouse movement)
-			if (m_selected_item != NULL && s.isValid()) {
+			if(m_selected_item != NULL && s.isValid()){
 				// Move 1 item
 				// TODO: middle mouse to move 10 items might be handy
 				if (m_rmouse_auto_place) {
@@ -3345,7 +3265,7 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 					// or contains the same item type as what is going to be
 					// moved
 					InventoryList *list_from = inv_selected->getList(m_selected_item->listname);
-					InventoryList *list_to = list_s;
+					InventoryList *list_to = inv_s->getList(s.listname);
 					assert(list_from && list_to);
 					ItemStack stack_from = list_from->getItem(m_selected_item->i);
 					ItemStack stack_to = list_to->getItem(s.i);
@@ -3356,7 +3276,8 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 		}
 
 		// Possibly send inventory action to server
-		if (move_amount > 0) {
+		if(move_amount > 0)
+		{
 			// Send IACTION_MOVE
 
 			assert(m_selected_item && m_selected_item->isValid());
@@ -3364,7 +3285,7 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 
 			assert(inv_selected && inv_s);
 			InventoryList *list_from = inv_selected->getList(m_selected_item->listname);
-			InventoryList *list_to = list_s;
+			InventoryList *list_to = inv_s->getList(s.listname);
 			assert(list_from && list_to);
 			ItemStack stack_from = list_from->getItem(m_selected_item->i);
 			ItemStack stack_to = list_to->getItem(s.i);
@@ -3383,7 +3304,7 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 				m_selected_content_guess_inventory = s.inventoryloc;
 			}
 			// Source stack goes fully into destination stack
-			else if (leftover.empty()) {
+			else if(leftover.empty()) {
 				m_selected_amount -= move_amount;
 				m_selected_content_guess = ItemStack(); // Clear
 			}
@@ -3394,7 +3315,7 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 				m_selected_content_guess = ItemStack(); // Clear
 			}
 
-			infostream << "Handing IACTION_MOVE to manager" << std::endl;
+			infostream<<"Handing IACTION_MOVE to manager"<<std::endl;
 			IMoveAction *a = new IMoveAction();
 			a->count = move_amount;
 			a->from_inv = m_selected_item->inventoryloc;
@@ -3404,68 +3325,8 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 			a->to_list = s.listname;
 			a->to_i = s.i;
 			m_invmgr->inventoryAction(a);
-		} else if (shift_move_amount > 0) {
-			u32 mis = m_inventory_rings.size();
-			u32 i = 0;
-			for (; i < mis; i++) {
-				const ListRingSpec &sp = m_inventory_rings[i];
-				if (sp.inventoryloc == s.inventoryloc
-						&& sp.listname == s.listname)
-					break;
-			}
-			do {
-				if (i >= mis) // if not found
-					break;
-				u32 to_inv_ind = (i + 1) % mis;
-				const ListRingSpec &to_inv_sp = m_inventory_rings[to_inv_ind];
-				InventoryList *list_from = list_s;
-				if (!s.isValid())
-					break;
-				Inventory *inv_to = m_invmgr->getInventory(to_inv_sp.inventoryloc);
-				if (!inv_to)
-					break;
-				InventoryList *list_to = inv_to->getList(to_inv_sp.listname);
-				if (!list_to)
-					break;
-				ItemStack stack_from = list_from->getItem(s.i);
-				assert(shift_move_amount <= stack_from.count);
-				if (m_client->getProtoVersion() >= 25) {
-					infostream << "Handing IACTION_MOVE to manager" << std::endl;
-					IMoveAction *a = new IMoveAction();
-					a->count = shift_move_amount;
-					a->from_inv = s.inventoryloc;
-					a->from_list = s.listname;
-					a->from_i = s.i;
-					a->to_inv = to_inv_sp.inventoryloc;
-					a->to_list = to_inv_sp.listname;
-					a->move_somewhere = true;
-					m_invmgr->inventoryAction(a);
-				} else {
-					// find a place (or more than one) to add the new item
-					u32 ilt_size = list_to->getSize();
-					ItemStack leftover;
-					for (u32 slot_to = 0; slot_to < ilt_size
-							&& shift_move_amount > 0; slot_to++) {
-						list_to->itemFits(slot_to, stack_from, &leftover);
-						if (leftover.count < stack_from.count) {
-							infostream << "Handing IACTION_MOVE to manager" << std::endl;
-							IMoveAction *a = new IMoveAction();
-							a->count = MYMIN(shift_move_amount,
-								(u32) (stack_from.count - leftover.count));
-							shift_move_amount -= a->count;
-							a->from_inv = s.inventoryloc;
-							a->from_list = s.listname;
-							a->from_i = s.i;
-							a->to_inv = to_inv_sp.inventoryloc;
-							a->to_list = to_inv_sp.listname;
-							a->to_i = slot_to;
-							m_invmgr->inventoryAction(a);
-							stack_from = leftover;
-						}
-					}
-				}
-			} while (0);
-		} else if (drop_amount > 0) {
+		}
+		else if(drop_amount > 0) {
 			m_selected_content_guess = ItemStack(); // Clear
 
 			// Send IACTION_DROP
@@ -3481,14 +3342,15 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 			assert(drop_amount > 0 && drop_amount <= m_selected_amount);
 			m_selected_amount -= drop_amount;
 
-			infostream << "Handing IACTION_DROP to manager" << std::endl;
+			infostream<<"Handing IACTION_DROP to manager"<<std::endl;
 			IDropAction *a = new IDropAction();
 			a->count = drop_amount;
 			a->from_inv = m_selected_item->inventoryloc;
 			a->from_list = m_selected_item->listname;
 			a->from_i = m_selected_item->i;
 			m_invmgr->inventoryAction(a);
-		} else if (craft_amount > 0) {
+		}
+		else if(craft_amount > 0) {
 			m_selected_content_guess = ItemStack(); // Clear
 
 			// Send IACTION_CRAFT
@@ -3496,7 +3358,7 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 			assert(s.isValid());
 			assert(inv_s);
 
-			infostream << "Handing IACTION_CRAFT to manager" << std::endl;
+			infostream<<"Handing IACTION_CRAFT to manager"<<std::endl;
 			ICraftAction *a = new ICraftAction();
 			a->count = craft_amount;
 			a->craft_inv = s.inventoryloc;
@@ -3504,7 +3366,7 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 		}
 
 		// If m_selected_amount has been decreased to zero, deselect
-		if (m_selected_amount == 0) {
+		if(m_selected_amount == 0) {
 			delete m_selected_item;
 			m_selected_item = NULL;
 			m_selected_amount = 0;
@@ -3513,12 +3375,12 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 		}
 		m_old_pointer = m_pointer;
 	}
-	if (event.EventType == EET_GUI_EVENT) {
+	if(event.EventType==EET_GUI_EVENT) {
 
-		if (event.GUIEvent.EventType == gui::EGET_TAB_CHANGED
+		if(event.GUIEvent.EventType==gui::EGET_TAB_CHANGED
 				&& isVisible()) {
 			// find the element that was clicked
-			for (unsigned int i=0; i<m_fields.size(); i++) {
+			for(unsigned int i=0; i<m_fields.size(); i++) {
 				FieldSpec &s = m_fields[i];
 				if ((s.ftype == f_TabHeader) &&
 						(s.fid == event.GUIEvent.Caller->getID())) {
@@ -3529,16 +3391,16 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 				}
 			}
 		}
-		if (event.GUIEvent.EventType == gui::EGET_ELEMENT_FOCUS_LOST
+		if(event.GUIEvent.EventType==gui::EGET_ELEMENT_FOCUS_LOST
 				&& isVisible()) {
-			if (!canTakeFocus(event.GUIEvent.Element)) {
+			if(!canTakeFocus(event.GUIEvent.Element)) {
 				infostream<<"GUIFormSpecMenu: Not allowing focus change."
 						<<std::endl;
 				// Returning true disables focus change
 				return true;
 			}
 		}
-		if ((event.GUIEvent.EventType == gui::EGET_BUTTON_CLICKED) ||
+		if((event.GUIEvent.EventType == gui::EGET_BUTTON_CLICKED) ||
 				(event.GUIEvent.EventType == gui::EGET_CHECKBOX_CHANGED) ||
 				(event.GUIEvent.EventType == gui::EGET_COMBO_BOX_CHANGED) ||
 				(event.GUIEvent.EventType == gui::EGET_SCROLL_BAR_CHANGED)) {
@@ -3550,26 +3412,26 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 					quitMenu();
 				} else {
 					acceptInput();
-					m_text_dst->gotText(L"ExitButton");
+					m_text_dst->gotText(narrow_to_wide("ExitButton"));
 				}
 				// quitMenu deallocates menu
 				return true;
 			}
 
 			// find the element that was clicked
-			for (u32 i = 0; i < m_fields.size(); i++) {
+			for(u32 i=0; i<m_fields.size(); i++) {
 				FieldSpec &s = m_fields[i];
 				// if its a button, set the send field so
 				// lua knows which button was pressed
 				if (((s.ftype == f_Button) || (s.ftype == f_CheckBox)) &&
 						(s.fid == event.GUIEvent.Caller->getID())) {
 					s.send = true;
-					if (s.is_exit) {
+					if(s.is_exit) {
 						if (m_allowclose) {
 							acceptInput(quit_mode_accept);
 							quitMenu();
 						} else {
-							m_text_dst->gotText(L"ExitButton");
+							m_text_dst->gotText(narrow_to_wide("ExitButton"));
 						}
 						return true;
 					} else {
@@ -3577,10 +3439,11 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 						s.send = false;
 						return true;
 					}
-				} else if ((s.ftype == f_DropDown) &&
+				}
+				else if ((s.ftype == f_DropDown) &&
 						(s.fid == event.GUIEvent.Caller->getID())) {
 					// only send the changed dropdown
-					for (u32 i = 0; i < m_fields.size(); i++) {
+					for(u32 i=0; i<m_fields.size(); i++) {
 						FieldSpec &s2 = m_fields[i];
 						if (s2.ftype == f_DropDown) {
 							s2.send = false;
@@ -3591,15 +3454,17 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 
 					// revert configuration to make sure dropdowns are sent on
 					// regular button click
-					for (u32 i = 0; i < m_fields.size(); i++) {
+					for(u32 i=0; i<m_fields.size(); i++) {
 						FieldSpec &s2 = m_fields[i];
 						if (s2.ftype == f_DropDown) {
 							s2.send = true;
 						}
 					}
 					return true;
-				} else if ((s.ftype == f_ScrollBar) &&
-						(s.fid == event.GUIEvent.Caller->getID())) {
+				}
+				else if ((s.ftype == f_ScrollBar) &&
+					(s.fid == event.GUIEvent.Caller->getID()))
+				{
 					s.fdefault = L"Changed";
 					acceptInput(quit_mode_no);
 					s.fdefault = L"";
@@ -3607,8 +3472,8 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 			}
 		}
 
-		if (event.GUIEvent.EventType == gui::EGET_EDITBOX_ENTER) {
-			if (event.GUIEvent.Caller->getID() > 257) {
+		if(event.GUIEvent.EventType == gui::EGET_EDITBOX_ENTER) {
+			if(event.GUIEvent.Caller->getID() > 257) {
 
 				if (m_allowclose) {
 					acceptInput(quit_mode_accept);
@@ -3622,11 +3487,11 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
 			}
 		}
 
-		if (event.GUIEvent.EventType == gui::EGET_TABLE_CHANGED) {
+		if(event.GUIEvent.EventType == gui::EGET_TABLE_CHANGED) {
 			int current_id = event.GUIEvent.Caller->getID();
-			if (current_id > 257) {
+			if(current_id > 257) {
 				// find the element that was clicked
-				for (u32 i = 0; i < m_fields.size(); i++) {
+				for(u32 i=0; i<m_fields.size(); i++) {
 					FieldSpec &s = m_fields[i];
 					// if it's a table, set the send field
 					// so lua knows which table was changed
@@ -3649,15 +3514,15 @@ bool GUIFormSpecMenu::OnEvent(const SEvent& event)
  * @param id of element
  * @return name string or empty string
  */
-std::string GUIFormSpecMenu::getNameByID(s32 id)
+std::wstring GUIFormSpecMenu::getNameByID(s32 id)
 {
 	for(std::vector<FieldSpec>::iterator iter =  m_fields.begin();
-				iter != m_fields.end(); ++iter) {
+				iter != m_fields.end(); iter++) {
 		if (iter->fid == id) {
 			return iter->fname;
 		}
 	}
-	return "";
+	return L"";
 }
 
 /**
@@ -3668,7 +3533,7 @@ std::string GUIFormSpecMenu::getNameByID(s32 id)
 std::wstring GUIFormSpecMenu::getLabelByID(s32 id)
 {
 	for(std::vector<FieldSpec>::iterator iter =  m_fields.begin();
-				iter != m_fields.end(); ++iter) {
+				iter != m_fields.end(); iter++) {
 		if (iter->fid == id) {
 			return iter->flabel;
 		}

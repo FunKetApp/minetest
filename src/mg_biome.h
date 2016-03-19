@@ -20,67 +20,57 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #ifndef MG_BIOME_HEADER
 #define MG_BIOME_HEADER
 
-#include "objdef.h"
-#include "nodedef.h"
+#include "mapgen.h"
+
+struct NoiseParams;
 
 enum BiomeType
 {
-	BIOME_NORMAL,
-	BIOME_LIQUID,
-	BIOME_NETHER,
-	BIOME_AETHER,
-	BIOME_FLAT
+	BIOME_TYPE_NORMAL,
+	BIOME_TYPE_LIQUID,
+	BIOME_TYPE_NETHER,
+	BIOME_TYPE_AETHER,
+	BIOME_TYPE_FLAT
 };
 
-class Biome : public ObjDef, public NodeResolver {
+class Biome : public GenElement {
 public:
 	u32 flags;
 
 	content_t c_top;
 	content_t c_filler;
 	content_t c_stone;
-	content_t c_water_top;
 	content_t c_water;
-	content_t c_river_water;
 	content_t c_dust;
+	content_t c_dust_water;
 
 	s16 depth_top;
 	s16 depth_filler;
-	s16 depth_water_top;
 
-	s16 y_min;
-	s16 y_max;
+	s16 height_min;
+	s16 height_max;
 	float heat_point;
 	float humidity_point;
-
-	virtual void resolveNodeNames();
 };
 
-class BiomeManager : public ObjDefManager {
+class BiomeManager : public GenElementManager {
 public:
-	static const char *OBJECT_TITLE;
+	static const char *ELEMENT_TITLE;
+	static const size_t ELEMENT_LIMIT = 0x100;
 
 	BiomeManager(IGameDef *gamedef);
-	virtual ~BiomeManager();
+	~BiomeManager();
 
-	const char *getObjectTitle() const
-	{
-		return "biome";
-	}
-
-	static Biome *create(BiomeType type)
+	Biome *create(int btt)
 	{
 		return new Biome;
 	}
 
-	virtual void clear();
+	void clear();
 
 	void calcBiomes(s16 sx, s16 sy, float *heat_map, float *humidity_map,
 		s16 *height_map, u8 *biomeid_map);
 	Biome *getBiome(float heat, float humidity, s16 y);
-
-private:
-	IGameDef *m_gamedef;
 };
 
 #endif

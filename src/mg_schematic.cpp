@@ -18,11 +18,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include <fstream>
-#include <typeinfo>
 #include "mg_schematic.h"
-#include "gamedef.h"
 #include "mapgen.h"
-#include "emerge.h"
 #include "map.h"
 #include "mapblock.h"
 #include "log.h"
@@ -31,34 +28,14 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "serialization.h"
 #include "filesys.h"
 
+const char *SchematicManager::ELEMENT_TITLE = "schematic";
+
 ///////////////////////////////////////////////////////////////////////////////
 
 
 SchematicManager::SchematicManager(IGameDef *gamedef) :
-	ObjDefManager(gamedef, OBJDEF_SCHEMATIC)
+	GenElementManager(gamedef)
 {
-	m_gamedef = gamedef;
-}
-
-
-void SchematicManager::clear()
-{
-	EmergeManager *emerge = m_gamedef->getEmergeManager();
-
-	// Remove all dangling references in Decorations
-	DecorationManager *decomgr = emerge->decomgr;
-	for (size_t i = 0; i != decomgr->getNumObjects(); i++) {
-		Decoration *deco = (Decoration *)decomgr->getRaw(i);
-
-		try {
-			DecoSchematic *dschem = dynamic_cast<DecoSchematic *>(deco);
-			if (dschem)
-				dschem->schematic = NULL;
-		} catch (std::bad_cast) {
-		}
-	}
-
-	ObjDefManager::clear();
 }
 
 
@@ -81,26 +58,27 @@ Schematic::~Schematic()
 }
 
 
-void Schematic::resolveNodeNames()
+void Schematic::updateContentIds()
 {
-	getIdsFromNrBacklog(&c_nodes, true, CONTENT_AIR);
+	if (flags & SCHEM_CIDS_UPDATED)
+		return;
+
+	flags |= SCHEM_CIDS_UPDATED;
 
 	size_t bufsize = size.X * size.Y * size.Z;
-	for (size_t i = 0; i != bufsize; i++) {
-		content_t c_original = schemdata[i].getContent();
-		content_t c_new = c_nodes[c_original];
-		schemdata[i].setContent(c_new);
-	}
+	for (size_t i = 0; i != bufsize; i++)
+		schemdata[i].setContent(c_nodes[schemdata[i].getContent()]);
 }
 
 
-void Schematic::blitToVManip(MMVManip *vm, v3s16 p, Rotation rot, bool force_place)
+void Schematic::blitToVManip(v3s16 p, ManualMapVoxelManipulator *vm,
+	Rotation rot, bool force_placement, INodeDefManager *ndef)
 {
-	sanity_check(m_ndef != NULL);
-
 	int xstride = 1;
 	int ystride = size.X;
 	int zstride = size.X * size.Y;
+
+	updateContentIds();
 
 	s16 sx = size.X;
 	s16 sy = size.Y;
@@ -133,8 +111,8 @@ void Schematic::blitToVManip(MMVManip *vm, v3s16 p, Rotation rot, bool force_pla
 
 	s16 y_map = p.Y;
 	for (s16 y = 0; y != sy; y++) {
-		if ((slice_probs[y] != MTSCHEM_PROB_ALWAYS) &&
-			(slice_probs[y] <= myrand_range(1, MTSCHEM_PROB_ALWAYS)))
+		if (slice_probs[y] != MTSCHEM_PROB_ALWAYS &&
+			myrand_range(1, 255) > slice_probs[y])
 			continue;
 
 		for (s16 z = 0; z != sz; z++) {
@@ -147,27 +125,24 @@ void Schematic::blitToVManip(MMVManip *vm, v3s16 p, Rotation rot, bool force_pla
 				if (schemdata[i].getContent() == CONTENT_IGNORE)
 					continue;
 
-				u8 placement_prob     = schemdata[i].param1 & MTSCHEM_PROB_MASK;
-				bool force_place_node = schemdata[i].param1 & MTSCHEM_FORCE_PLACE;
-
-				if (placement_prob == MTSCHEM_PROB_NEVER)
+				if (schemdata[i].param1 == MTSCHEM_PROB_NEVER)
 					continue;
 
-				if (!force_place && !force_place_node) {
+				if (!force_placement) {
 					content_t c = vm->m_data[vi].getContent();
 					if (c != CONTENT_AIR && c != CONTENT_IGNORE)
 						continue;
 				}
 
-				if ((placement_prob != MTSCHEM_PROB_ALWAYS) &&
-					(placement_prob <= myrand_range(1, MTSCHEM_PROB_ALWAYS)))
+				if (schemdata[i].param1 != MTSCHEM_PROB_ALWAYS &&
+					myrand_range(1, 255) > schemdata[i].param1)
 					continue;
 
 				vm->m_data[vi] = schemdata[i];
 				vm->m_data[vi].param1 = 0;
 
 				if (rot)
-					vm->m_data[vi].rotateAlongYAxis(m_ndef, rot);
+					vm->m_data[vi].rotateAlongYAxis(ndef, rot);
 			}
 		}
 		y_map++;
@@ -175,21 +150,18 @@ void Schematic::blitToVManip(MMVManip *vm, v3s16 p, Rotation rot, bool force_pla
 }
 
 
-bool Schematic::placeOnVManip(MMVManip *vm, v3s16 p, u32 flags,
-	Rotation rot, bool force_place)
+void Schematic::placeStructure(Map *map, v3s16 p, u32 flags,
+	Rotation rot, bool force_placement, INodeDefManager *ndef)
 {
-	assert(vm != NULL);
 	assert(schemdata != NULL);
-	sanity_check(m_ndef != NULL);
+	ManualMapVoxelManipulator *vm = new ManualMapVoxelManipulator(map);
 
-	//// Determine effective rotation and effective schematic dimensions
 	if (rot == ROTATE_RAND)
 		rot = (Rotation)myrand_range(ROTATE_0, ROTATE_270);
 
 	v3s16 s = (rot == ROTATE_90 || rot == ROTATE_270) ?
-		v3s16(size.Z, size.Y, size.X) : size;
+				v3s16(size.Z, size.Y, size.X) : size;
 
-	//// Adjust placement position if necessary
 	if (flags & DECO_PLACE_CENTER_X)
 		p.X -= (s.X + 1) / 2;
 	if (flags & DECO_PLACE_CENTER_Y)
@@ -197,149 +169,132 @@ bool Schematic::placeOnVManip(MMVManip *vm, v3s16 p, u32 flags,
 	if (flags & DECO_PLACE_CENTER_Z)
 		p.Z -= (s.Z + 1) / 2;
 
-	blitToVManip(vm, p, rot, force_place);
-
-	return vm->m_area.contains(VoxelArea(p, p + s - v3s16(1,1,1)));
-}
-
-void Schematic::placeOnMap(Map *map, v3s16 p, u32 flags,
-	Rotation rot, bool force_place)
-{
-	std::map<v3s16, MapBlock *> lighting_modified_blocks;
-	std::map<v3s16, MapBlock *> modified_blocks;
-	std::map<v3s16, MapBlock *>::iterator it;
-
-	assert(map != NULL);
-	assert(schemdata != NULL);
-	sanity_check(m_ndef != NULL);
-
-	//// Determine effective rotation and effective schematic dimensions
-	if (rot == ROTATE_RAND)
-		rot = (Rotation)myrand_range(ROTATE_0, ROTATE_270);
-
-	v3s16 s = (rot == ROTATE_90 || rot == ROTATE_270) ?
-			v3s16(size.Z, size.Y, size.X) : size;
-
-	//// Adjust placement position if necessary
-	if (flags & DECO_PLACE_CENTER_X)
-		p.X -= (s.X + 1) / 2;
-	if (flags & DECO_PLACE_CENTER_Y)
-		p.Y -= (s.Y + 1) / 2;
-	if (flags & DECO_PLACE_CENTER_Z)
-		p.Z -= (s.Z + 1) / 2;
-
-	//// Create VManip for effected area, emerge our area, modify area
-	//// inside VManip, then blit back.
 	v3s16 bp1 = getNodeBlockPos(p);
 	v3s16 bp2 = getNodeBlockPos(p + s - v3s16(1,1,1));
+	vm->initialEmerge(bp1, bp2);
 
-	MMVManip vm(map);
-	vm.initialEmerge(bp1, bp2);
+	blitToVManip(p, vm, rot, force_placement, ndef);
 
-	blitToVManip(&vm, p, rot, force_place);
+	std::map<v3s16, MapBlock *> lighting_modified_blocks;
+	std::map<v3s16, MapBlock *> modified_blocks;
+	vm->blitBackAll(&modified_blocks);
 
-	vm.blitBackAll(&modified_blocks);
-
-	//// Carry out post-map-modification actions
-
-	//// Update lighting
 	// TODO: Optimize this by using Mapgen::calcLighting() instead
 	lighting_modified_blocks.insert(modified_blocks.begin(), modified_blocks.end());
 	map->updateLighting(lighting_modified_blocks, modified_blocks);
 
-	//// Create & dispatch map modification events to observers
 	MapEditEvent event;
 	event.type = MEET_OTHER;
-	for (it = modified_blocks.begin(); it != modified_blocks.end(); ++it)
+	for (std::map<v3s16, MapBlock *>::iterator
+		it = modified_blocks.begin();
+		it != modified_blocks.end(); ++it)
 		event.modified_blocks.insert(it->first);
 
 	map->dispatchEvent(&event);
 }
 
 
-bool Schematic::deserializeFromMts(std::istream *is,
-	std::vector<std::string> *names)
+bool Schematic::loadSchematicFromFile(const char *filename,
+	NodeResolver *resolver,
+	std::map<std::string, std::string> &replace_names)
 {
-	std::istream &ss = *is;
 	content_t cignore = CONTENT_IGNORE;
 	bool have_cignore = false;
 
-	//// Read signature
-	u32 signature = readU32(ss);
+	std::ifstream is(filename, std::ios_base::binary);
+
+	u32 signature = readU32(is);
 	if (signature != MTSCHEM_FILE_SIGNATURE) {
-		errorstream << "Schematic::deserializeFromMts: invalid schematic "
+		errorstream << "loadSchematicFile: invalid schematic "
 			"file" << std::endl;
 		return false;
 	}
 
-	//// Read version
-	u16 version = readU16(ss);
+	u16 version = readU16(is);
 	if (version > MTSCHEM_FILE_VER_HIGHEST_READ) {
-		errorstream << "Schematic::deserializeFromMts: unsupported schematic "
+		errorstream << "loadSchematicFile: unsupported schematic "
 			"file version" << std::endl;
 		return false;
 	}
 
-	//// Read size
-	size = readV3S16(ss);
+	size = readV3S16(is);
 
-	//// Read Y-slice probability values
 	delete []slice_probs;
 	slice_probs = new u8[size.Y];
 	for (int y = 0; y != size.Y; y++)
-		slice_probs[y] = (version >= 3) ? readU8(ss) : MTSCHEM_PROB_ALWAYS_OLD;
+		slice_probs[y] = (version >= 3) ? readU8(is) : MTSCHEM_PROB_ALWAYS;
 
-	//// Read node names
-	u16 nidmapcount = readU16(ss);
+	int nodecount = size.X * size.Y * size.Z;
+
+	u16 nidmapcount = readU16(is);
+
 	for (int i = 0; i != nidmapcount; i++) {
-		std::string name = deSerializeString(ss);
-
-		// Instances of "ignore" from v1 are converted to air (and instances
-		// are fixed to have MTSCHEM_PROB_NEVER later on).
+		std::string name = deSerializeString(is);
 		if (name == "ignore") {
 			name = "air";
 			cignore = i;
 			have_cignore = true;
 		}
 
-		names->push_back(name);
-	}
+		std::map<std::string, std::string>::iterator it;
+		it = replace_names.find(name);
+		if (it != replace_names.end())
+			name = it->second;
 
-	//// Read node data
-	size_t nodecount = size.X * size.Y * size.Z;
+		resolver->addNodeList(name.c_str(), &c_nodes);
+	}
 
 	delete []schemdata;
 	schemdata = new MapNode[nodecount];
+	MapNode::deSerializeBulk(is, SER_FMT_VER_HIGHEST_READ, schemdata,
+				nodecount, 2, 2, true);
 
-	MapNode::deSerializeBulk(ss, SER_FMT_VER_HIGHEST_READ, schemdata,
-		nodecount, 2, 2, true);
-
-	// Fix probability values for nodes that were ignore; removed in v2
-	if (version < 2) {
-		for (size_t i = 0; i != nodecount; i++) {
+	if (version == 1) { // fix up the probability values
+		for (int i = 0; i != nodecount; i++) {
 			if (schemdata[i].param1 == 0)
-				schemdata[i].param1 = MTSCHEM_PROB_ALWAYS_OLD;
+				schemdata[i].param1 = MTSCHEM_PROB_ALWAYS;
 			if (have_cignore && schemdata[i].getContent() == cignore)
 				schemdata[i].param1 = MTSCHEM_PROB_NEVER;
 		}
-	}
-
-	// Fix probability values for probability range truncation introduced in v4
-	if (version < 4) {
-		for (s16 y = 0; y != size.Y; y++)
-			slice_probs[y] >>= 1;
-		for (size_t i = 0; i != nodecount; i++)
-			schemdata[i].param1 >>= 1;
 	}
 
 	return true;
 }
 
 
-bool Schematic::serializeToMts(std::ostream *os,
-	const std::vector<std::string> &names)
+/*
+	Minetest Schematic File Format
+
+	All values are stored in big-endian byte order.
+	[u32] signature: 'MTSM'
+	[u16] version: 3
+	[u16] size X
+	[u16] size Y
+	[u16] size Z
+	For each Y:
+		[u8] slice probability value
+	[Name-ID table] Name ID Mapping Table
+		[u16] name-id count
+		For each name-id mapping:
+			[u16] name length
+			[u8[]] name
+	ZLib deflated {
+	For each node in schematic:  (for z, y, x)
+		[u16] content
+	For each node in schematic:
+		[u8] probability of occurance (param1)
+	For each node in schematic:
+		[u8] param2
+	}
+
+	Version changes:
+	1 - Initial version
+	2 - Fixed messy never/always place; 0 probability is now never, 0xFF is always
+	3 - Added y-slice probabilities; this allows for variable height structures
+*/
+void Schematic::saveSchematicToFile(const char *filename, INodeDefManager *ndef)
 {
-	std::ostream &ss = *os;
+	std::ostringstream ss(std::ios_base::binary);
 
 	writeU32(ss, MTSCHEM_FILE_SIGNATURE);         // signature
 	writeU16(ss, MTSCHEM_FILE_VER_HIGHEST_WRITE); // version
@@ -348,165 +303,51 @@ bool Schematic::serializeToMts(std::ostream *os,
 	for (int y = 0; y != size.Y; y++)             // Y slice probabilities
 		writeU8(ss, slice_probs[y]);
 
-	writeU16(ss, names.size()); // name count
-	for (size_t i = 0; i != names.size(); i++)
-		ss << serializeString(names[i]); // node names
+	std::vector<content_t> usednodes;
+	int nodecount = size.X * size.Y * size.Z;
+	build_nnlist_and_update_ids(schemdata, nodecount, &usednodes);
+
+	u16 numids = usednodes.size();
+	writeU16(ss, numids); // name count
+	for (int i = 0; i != numids; i++)
+		ss << serializeString(ndef->get(usednodes[i]).name); // node names
 
 	// compressed bulk node data
-	MapNode::serializeBulk(ss, SER_FMT_VER_HIGHEST_WRITE,
-		schemdata, size.X * size.Y * size.Z, 2, 2, true);
+	MapNode::serializeBulk(ss, SER_FMT_VER_HIGHEST_WRITE, schemdata,
+				nodecount, 2, 2, true);
 
-	return true;
+	fs::safeWriteToFile(filename, ss.str());
 }
 
 
-bool Schematic::serializeToLua(std::ostream *os,
-	const std::vector<std::string> &names, bool use_comments, u32 indent_spaces)
+void build_nnlist_and_update_ids(MapNode *nodes, u32 nodecount,
+	std::vector<content_t> *usednodes)
 {
-	std::ostream &ss = *os;
+	std::map<content_t, content_t> nodeidmap;
+	content_t numids = 0;
 
-	std::string indent("\t");
-	if (indent_spaces > 0)
-		indent.assign(indent_spaces, ' ');
+	for (u32 i = 0; i != nodecount; i++) {
+		content_t id;
+		content_t c = nodes[i].getContent();
 
-	//// Write header
-	{
-		ss << "schematic = {" << std::endl;
-		ss << indent << "size = "
-			<< "{x=" << size.X
-			<< ", y=" << size.Y
-			<< ", z=" << size.Z
-			<< "}," << std::endl;
-	}
+		std::map<content_t, content_t>::const_iterator it = nodeidmap.find(c);
+		if (it == nodeidmap.end()) {
+			id = numids;
+			numids++;
 
-	//// Write y-slice probabilities
-	{
-		ss << indent << "yslice_prob = {" << std::endl;
-
-		for (u16 y = 0; y != size.Y; y++) {
-			u8 probability = slice_probs[y] & MTSCHEM_PROB_MASK;
-
-			ss << indent << indent << "{"
-				<< "ypos=" << y
-				<< ", prob=" << (u16)probability * 2
-				<< "}," << std::endl;
+			usednodes->push_back(c);
+			nodeidmap.insert(std::make_pair(c, id));
+		} else {
+			id = it->second;
 		}
-
-		ss << indent << "}," << std::endl;
+		nodes[i].setContent(id);
 	}
-
-	//// Write node data
-	{
-		ss << indent << "data = {" << std::endl;
-
-		u32 i = 0;
-		for (u16 z = 0; z != size.Z; z++)
-		for (u16 y = 0; y != size.Y; y++) {
-			if (use_comments) {
-				ss << std::endl
-					<< indent << indent
-					<< "-- z=" << z
-					<< ", y=" << y << std::endl;
-			}
-
-			for (u16 x = 0; x != size.X; x++, i++) {
-				u8 probability   = schemdata[i].param1 & MTSCHEM_PROB_MASK;
-				bool force_place = schemdata[i].param1 & MTSCHEM_FORCE_PLACE;
-
-				ss << indent << indent << "{"
-					<< "name=\"" << names[schemdata[i].getContent()]
-					<< "\", prob=" << (u16)probability * 2
-					<< ", param2=" << (u16)schemdata[i].param2;
-
-				if (force_place)
-					ss << ", force_place=true";
-
-				ss << "}," << std::endl;
-			}
-		}
-
-		ss << indent << "}," << std::endl;
-	}
-
-	ss << "}" << std::endl;
-
-	return true;
-}
-
-
-bool Schematic::loadSchematicFromFile(const std::string &filename,
-	INodeDefManager *ndef, StringMap *replace_names)
-{
-	std::ifstream is(filename.c_str(), std::ios_base::binary);
-	if (!is.good()) {
-		errorstream << "Schematic::loadSchematicFile: unable to open file '"
-			<< filename << "'" << std::endl;
-		return false;
-	}
-
-	size_t origsize = m_nodenames.size();
-	if (!deserializeFromMts(&is, &m_nodenames))
-		return false;
-
-	if (replace_names) {
-		for (size_t i = origsize; i != m_nodenames.size(); i++) {
-			std::string &name = m_nodenames[i];
-			StringMap::iterator it = replace_names->find(name);
-			if (it != replace_names->end())
-				name = it->second;
-		}
-	}
-
-	m_nnlistsizes.push_back(m_nodenames.size() - origsize);
-
-	if (ndef)
-		ndef->pendNodeResolve(this);
-
-	return true;
-}
-
-
-bool Schematic::saveSchematicToFile(const std::string &filename,
-	INodeDefManager *ndef)
-{
-	MapNode *orig_schemdata = schemdata;
-	std::vector<std::string> ndef_nodenames;
-	std::vector<std::string> *names;
-
-	if (m_resolve_done && ndef == NULL)
-		ndef = m_ndef;
-
-	if (ndef) {
-		names = &ndef_nodenames;
-
-		u32 volume = size.X * size.Y * size.Z;
-		schemdata = new MapNode[volume];
-		for (u32 i = 0; i != volume; i++)
-			schemdata[i] = orig_schemdata[i];
-
-		generate_nodelist_and_update_ids(schemdata, volume, names, ndef);
-	} else { // otherwise, use the names we have on hand in the list
-		names = &m_nodenames;
-	}
-
-	std::ostringstream os(std::ios_base::binary);
-	bool status = serializeToMts(&os, *names);
-
-	if (ndef) {
-		delete []schemdata;
-		schemdata = orig_schemdata;
-	}
-
-	if (!status)
-		return false;
-
-	return fs::safeWriteToFile(filename, os.str());
 }
 
 
 bool Schematic::getSchematicFromMap(Map *map, v3s16 p1, v3s16 p2)
 {
-	MMVManip *vm = new MMVManip(map);
+	ManualMapVoxelManipulator *vm = new ManualMapVoxelManipulator(map);
 
 	v3s16 bp1 = getNodeBlockPos(p1);
 	v3s16 bp2 = getNodeBlockPos(p2);
@@ -555,30 +396,5 @@ void Schematic::applyProbabilities(v3s16 p0,
 	for (size_t i = 0; i != splist->size(); i++) {
 		s16 y = (*splist)[i].first - p0.Y;
 		slice_probs[y] = (*splist)[i].second;
-	}
-}
-
-
-void generate_nodelist_and_update_ids(MapNode *nodes, size_t nodecount,
-	std::vector<std::string> *usednodes, INodeDefManager *ndef)
-{
-	std::map<content_t, content_t> nodeidmap;
-	content_t numids = 0;
-
-	for (size_t i = 0; i != nodecount; i++) {
-		content_t id;
-		content_t c = nodes[i].getContent();
-
-		std::map<content_t, content_t>::const_iterator it = nodeidmap.find(c);
-		if (it == nodeidmap.end()) {
-			id = numids;
-			numids++;
-
-			usednodes->push_back(ndef->get(c).name);
-			nodeidmap.insert(std::make_pair(c, id));
-		} else {
-			id = it->second;
-		}
-		nodes[i].setContent(id);
 	}
 }

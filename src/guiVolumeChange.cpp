@@ -26,6 +26,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <IGUIScrollBar.h>
 #include <IGUIStaticText.h>
 #include <IGUIFont.h>
+#include "main.h"
 #include "settings.h"
 
 #include "gettext.h"
@@ -102,7 +103,7 @@ void GUIVolumeChange::regenerateGui(v2u32 screensize)
 	{
 		core::rect<s32> rect(0, 0, 120, 20);
 		rect = rect + v2s32(size.X/2-60, size.Y/2-35);
-		const wchar_t *text = wgettext("Sound Volume: ");
+		wchar_t* text = wgettext("Sound Volume: ");
 		Environment->addStaticText(text, rect, false,
 				true, this, ID_soundText1);
 		delete[] text;
@@ -116,7 +117,7 @@ void GUIVolumeChange::regenerateGui(v2u32 screensize)
 	{
 		core::rect<s32> rect(0, 0, 80, 30);
 		rect = rect + v2s32(size.X/2-80/2, size.Y/2+55);
-		const wchar_t *text = wgettext("Exit");
+		wchar_t* text = wgettext("Exit");
 		Environment->addButton(rect, this, ID_soundExitButton,
 			text);
 		delete[] text;

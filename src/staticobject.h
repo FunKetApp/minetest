@@ -23,7 +23,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "irrlichttypes_bloated.h"
 #include <string>
 #include <sstream>
-#include <vector>
+#include <list>
 #include <map>
 #include "debug.h"
 
@@ -68,7 +68,8 @@ public:
 			{
 				dstream<<"ERROR: StaticObjectList::insert(): "
 						<<"id already exists"<<std::endl;
-				FATAL_ERROR("StaticObjectList::insert()");
+				assert(0);
+				return;
 			}
 			m_active[id] = obj;
 		}
@@ -76,10 +77,10 @@ public:
 
 	void remove(u16 id)
 	{
-		assert(id != 0); // Pre-condition
+		assert(id != 0);
 		if(m_active.find(id) == m_active.end())
 		{
-			warningstream<<"StaticObjectList::remove(): id="<<id
+			dstream<<"WARNING: StaticObjectList::remove(): id="<<id
 					<<" not found"<<std::endl;
 			return;
 		}
@@ -94,7 +95,7 @@ public:
 		from m_stored and inserted to m_active.
 		The caller directly manipulates these containers.
 	*/
-	std::vector<StaticObject> m_stored;
+	std::list<StaticObject> m_stored;
 	std::map<u16, StaticObject> m_active;
 
 private:

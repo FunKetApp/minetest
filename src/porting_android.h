@@ -43,10 +43,10 @@ void initAndroid();
 void cleanupAndroid();
 
 /**
- * Initializes path_* variables for Android
- * @param env Android JNI environment
+ * set storage dir on external sdcard#
+ * @param lJNIEnv environment from android
  */
-void initializePathsAndroid();
+void setExternalStorageDir(JNIEnv* lJNIEnv);
 
 /**
  * use java function to copy media from assets to external storage

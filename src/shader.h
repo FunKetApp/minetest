@@ -110,7 +110,4 @@ public:
 
 IWritableShaderSource* createShaderSource(IrrlichtDevice *device);
 
-void dumpShaderProgram(std::ostream &output_stream,
-	const std::string &program_type, const std::string &program);
-
 #endif

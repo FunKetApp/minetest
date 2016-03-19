@@ -52,10 +52,10 @@ public:
 	}
 };
 
-class LuaError : public ModError
+class LuaError : public ServerError
 {
 public:
-	LuaError(const std::string &s) : ModError(s) {}
+	LuaError(const std::string &s) : ServerError(s) {}
 };
 
 

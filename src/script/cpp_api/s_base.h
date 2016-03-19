@@ -28,31 +28,12 @@ extern "C" {
 }
 
 #include "irrlichttypes.h"
-#include "threads.h"
-#include "threading/mutex.h"
-#include "threading/mutex_auto_lock.h"
+#include "jthread/jmutex.h"
+#include "jthread/jmutexautolock.h"
 #include "common/c_types.h"
 #include "common/c_internal.h"
 
 #define SCRIPTAPI_LOCK_DEBUG
-#define SCRIPTAPI_DEBUG
-
-// MUST be an invalid mod name so that mods can't
-// use that name to bypass security!
-#define BUILTIN_MOD_NAME "*builtin*"
-
-#define PCALL_RES(RES) do {                 \
-	int result_ = (RES);                    \
-	if (result_ != 0) {                     \
-		scriptError(result_, __FUNCTION__); \
-	}                                       \
-} while (0)
-
-#define runCallbacks(nargs, mode) \
-	runCallbacksRaw((nargs), (mode), __FUNCTION__)
-
-#define setOriginFromTable(index) \
-	setOriginFromTableRaw(index, __FUNCTION__)
 
 class Server;
 class Environment;
@@ -61,29 +42,19 @@ class ServerActiveObject;
 
 class ScriptApiBase {
 public:
+
 	ScriptApiBase();
 	virtual ~ScriptApiBase();
 
-	// These throw a ModError on failure
-	void loadMod(const std::string &script_path, const std::string &mod_name);
-	void loadScript(const std::string &script_path);
-
-	void runCallbacksRaw(int nargs,
-		RunCallbacksMode mode, const char *fxn);
+	bool loadMod(const std::string &scriptpath, const std::string &modname);
+	bool loadScript(const std::string &scriptpath);
 
 	/* object */
 	void addObjectReference(ServerActiveObject *cobj);
 	void removeObjectReference(ServerActiveObject *cobj);
 
-	Server* getServer() { return m_server; }
-
-	std::string getOrigin() { return m_last_run_mod; }
-	void setOriginDirect(const char *origin);
-	void setOriginFromTableRaw(int index, const char *fxn);
-
 protected:
 	friend class LuaABM;
-	friend class LuaLBM;
 	friend class InvRef;
 	friend class ObjectRef;
 	friend class NodeMetaRef;
@@ -95,9 +66,10 @@ protected:
 		{ return m_luastack; }
 
 	void realityCheck();
-	void scriptError(int result, const char *fxn);
+	void scriptError();
 	void stackDump(std::ostream &o);
 
+	Server* getServer() { return m_server; }
 	void setServer(Server* server) { m_server = server; }
 
 	Environment* getEnv() { return m_environment; }
@@ -109,12 +81,11 @@ protected:
 	void objectrefGetOrCreate(lua_State *L, ServerActiveObject *cobj);
 	void objectrefGet(lua_State *L, u16 id);
 
-	RecursiveMutex  m_luastackmutex;
-	std::string     m_last_run_mod;
-	bool            m_secure;
+	JMutex          m_luastackmutex;
+	// Stack index of Lua error handler
+	int             m_errorhandler;
 #ifdef SCRIPTAPI_LOCK_DEBUG
-	int             m_lock_recursion_count;
-	threadid_t      m_owning_thread;
+	bool            m_locked;
 #endif
 
 private:

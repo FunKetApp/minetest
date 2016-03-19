@@ -19,7 +19,6 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "guiEngine.h"
 
-#include <fstream>
 #include <IGUIStaticText.h>
 #include <ICameraSceneNode.h>
 #include "scripting_mainmenu.h"
@@ -28,6 +27,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "version.h"
 #include "porting.h"
 #include "filesys.h"
+#include "main.h"
 #include "settings.h"
 #include "guiMainMenu.h"
 #include "sound.h"
@@ -36,10 +36,9 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "httpfetch.h"
 #include "log.h"
 #include "fontengine.h"
-#include "guiscalingfilter.h"
 
 #ifdef __ANDROID__
-#include "client/tile.h"
+#include "tile.h"
 #include <GLES/gl.h>
 #endif
 
@@ -53,7 +52,7 @@ TextDestGuiEngine::TextDestGuiEngine(GUIEngine* engine)
 }
 
 /******************************************************************************/
-void TextDestGuiEngine::gotText(const StringMap &fields)
+void TextDestGuiEngine::gotText(std::map<std::string, std::string> fields)
 {
 	m_engine->getScriptIface()->handleMainMenuButtons(fields);
 }
@@ -61,7 +60,7 @@ void TextDestGuiEngine::gotText(const StringMap &fields)
 /******************************************************************************/
 void TextDestGuiEngine::gotText(std::wstring text)
 {
-	m_engine->getScriptIface()->handleMainMenuEvent(wide_to_utf8(text));
+	m_engine->getScriptIface()->handleMainMenuEvent(wide_to_narrow(text));
 }
 
 /******************************************************************************/
@@ -172,8 +171,8 @@ GUIEngine::GUIEngine(	irr::IrrlichtDevice* dev,
 		m_sound_manager = &dummySoundManager;
 
 	//create topleft header
-	std::wstring t = utf8_to_wide(std::string(PROJECT_NAME_C " ") +
-			g_version_hash);
+	std::wstring t = narrow_to_wide(std::string("Minetest ") +
+			minetest_version_hash);
 
 	core::rect<s32> rect(0, 0, g_fontengine->getTextWidth(t), g_fontengine->getTextHeight());
 	rect += v2s32(4, 0);
@@ -195,8 +194,7 @@ GUIEngine::GUIEngine(	irr::IrrlichtDevice* dev,
 			m_texture_source,
 			m_formspecgui,
 			m_buttonhandler,
-			NULL,
-			false);
+			NULL);
 
 	m_menu->allowClose(false);
 	m_menu->lockSize(true,v2u32(800,600));
@@ -208,8 +206,10 @@ GUIEngine::GUIEngine(	irr::IrrlichtDevice* dev,
 	m_script = new MainMenuScripting(this);
 
 	try {
-		m_script->setMainMenuData(&m_data->script_data);
-		m_data->script_data.errormessage = "";
+		if (m_data->errormessage != "") {
+			m_script->setMainMenuErrorMessage(m_data->errormessage);
+			m_data->errormessage = "";
+		}
 
 		if (!loadMainMenuScript()) {
 			errorstream << "No future without mainmenu" << std::endl;
@@ -217,9 +217,10 @@ GUIEngine::GUIEngine(	irr::IrrlichtDevice* dev,
 		}
 
 		run();
-	} catch (LuaError &e) {
+	}
+	catch(LuaError &e) {
 		errorstream << "MAINMENU ERROR: " << e.what() << std::endl;
-		m_data->script_data.errormessage = e.what();
+		m_data->errormessage = e.what();
 	}
 
 	m_menu->quitMenu();
@@ -238,13 +239,13 @@ bool GUIEngine::loadMainMenuScript()
 	}
 
 	std::string script = porting::path_share + DIR_DELIM "builtin" + DIR_DELIM "init.lua";
-	try {
-		m_script->loadScript(script);
+	if (m_script->loadScript(script)) {
 		// Menu script loaded
 		return true;
-	} catch (const ModError &e) {
-		errorstream << "GUIEngine: execution of menu script failed: "
-			<< e.what() << std::endl;
+	} else {
+		infostream
+			<< "GUIEngine: execution of menu script in: \""
+			<< m_scriptdir << "\" failed!" << std::endl;
 	}
 
 	return false;
@@ -303,7 +304,7 @@ void GUIEngine::run()
 GUIEngine::~GUIEngine()
 {
 	video::IVideoDriver* driver = m_device->getVideoDriver();
-	FATAL_ERROR_IF(driver == 0, "Could not get video driver");
+	assert(driver != 0);
 
 	if(m_sound_manager != &dummySoundManager){
 		delete m_sound_manager;
@@ -363,14 +364,15 @@ void GUIEngine::cloudPostProcess()
 {
 	float fps_max = g_settings->getFloat("fps_max");
 	// Time of frame without fps limit
+	float busytime;
 	u32 busytime_u32;
-
 	// not using getRealTime is necessary for wine
 	u32 time = m_device->getTimer()->getTime();
 	if(time > m_cloud.lasttime)
 		busytime_u32 = time - m_cloud.lasttime;
 	else
 		busytime_u32 = 0;
+	busytime = busytime_u32 / 1000.0;
 
 	// FPS limiter
 	u32 frametime_min = 1000./fps_max;
@@ -407,7 +409,7 @@ void GUIEngine::drawBackground(video::IVideoDriver* driver)
 		{
 			for (unsigned int y = 0; y < screensize.Y; y += tilesize.Y )
 			{
-				draw2DImageFilterScaled(driver, texture,
+				driver->draw2DImage(texture,
 					core::rect<s32>(x, y, x+tilesize.X, y+tilesize.Y),
 					core::rect<s32>(0, 0, sourcesize.X, sourcesize.Y),
 					NULL, NULL, true);
@@ -417,7 +419,7 @@ void GUIEngine::drawBackground(video::IVideoDriver* driver)
 	}
 
 	/* Draw background texture */
-	draw2DImageFilterScaled(driver, texture,
+	driver->draw2DImage(texture,
 		core::rect<s32>(0, 0, screensize.X, screensize.Y),
 		core::rect<s32>(0, 0, sourcesize.X, sourcesize.Y),
 		NULL, NULL, true);
@@ -436,7 +438,7 @@ void GUIEngine::drawOverlay(video::IVideoDriver* driver)
 
 	/* Draw background texture */
 	v2u32 sourcesize = texture->getOriginalSize();
-	draw2DImageFilterScaled(driver, texture,
+	driver->draw2DImage(texture,
 		core::rect<s32>(0, 0, screensize.X, screensize.Y),
 		core::rect<s32>(0, 0, sourcesize.X, sourcesize.Y),
 		NULL, NULL, true);
@@ -469,7 +471,7 @@ void GUIEngine::drawHeader(video::IVideoDriver* driver)
 
 	video::SColor bgcolor(255,50,50,50);
 
-	draw2DImageFilterScaled(driver, texture, splashrect,
+	driver->draw2DImage(texture, splashrect,
 		core::rect<s32>(core::position2d<s32>(0,0),
 		core::dimension2di(texture->getOriginalSize())),
 		NULL, NULL, true);
@@ -501,7 +503,7 @@ void GUIEngine::drawFooter(video::IVideoDriver* driver)
 		rect += v2s32(screensize.Width/2,screensize.Height-footersize.Y);
 		rect -= v2s32(footersize.X/2, 0);
 
-		draw2DImageFilterScaled(driver, texture, rect,
+		driver->draw2DImage(texture, rect,
 			core::rect<s32>(core::position2d<s32>(0,0),
 			core::dimension2di(texture->getOriginalSize())),
 			NULL, NULL, true);
@@ -513,7 +515,7 @@ bool GUIEngine::setTexture(texture_layer layer, std::string texturepath,
 		bool tile_image, unsigned int minsize)
 {
 	video::IVideoDriver* driver = m_device->getVideoDriver();
-	FATAL_ERROR_IF(driver == 0, "Could not get video driver");
+	assert(driver != 0);
 
 	if (m_textures[layer].texture != NULL)
 	{
@@ -569,13 +571,13 @@ bool GUIEngine::downloadFile(std::string url, std::string target)
 /******************************************************************************/
 void GUIEngine::setTopleftText(std::string append)
 {
-	std::wstring toset = utf8_to_wide(std::string(PROJECT_NAME_C " ") +
-		g_version_hash);
+	std::wstring toset = narrow_to_wide( std::string("Minetest ") +
+			minetest_version_hash);
 
 	if (append != "")
 	{
 		toset += L" / ";
-		toset += utf8_to_wide(append);
+		toset += narrow_to_wide(append);
 	}
 
 	m_irr_toplefttext->setText(toset.c_str());

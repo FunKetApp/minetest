@@ -17,31 +17,31 @@
 
 --------------------------------------------------------------------------------
 function get_mods(path,retval,modpack)
-	local mods = core.get_dir_list(path, true)
+	local mods = core.get_dirlist(path, true)
 	
-	for _, name in ipairs(mods) do
-		if name:sub(1, 1) ~= "." then
-			local prefix = path .. DIR_DELIM .. name .. DIR_DELIM
+	for i=1, #mods, 1 do
+		if mods[i]:sub(1,1) ~= "." then
 			local toadd = {}
-			retval[#retval + 1] = toadd
+			local modpackfile = nil
 
-			local mod_conf = Settings(prefix .. "mod.conf"):to_table()
-			if mod_conf.name then
-				name = mod_conf.name
-			end
-
-			toadd.name = name
-			toadd.path = prefix
-
-			if modpack ~= nil and modpack ~= "" then
+			toadd.name = mods[i]
+			toadd.path = path .. DIR_DELIM .. mods[i] .. DIR_DELIM
+			if modpack ~= nil and
+				modpack ~= "" then
 				toadd.modpack = modpack
 			else
-				local modpackfile = io.open(prefix .. "modpack.txt")
-				if modpackfile then
-					modpackfile:close()
-					toadd.is_modpack = true
-					get_mods(prefix, retval, name)
-				end
+				local filename = path .. DIR_DELIM .. mods[i] .. DIR_DELIM .. "modpack.txt"
+				local error = nil
+				modpackfile,error = io.open(filename,"r")
+			end
+
+			if modpackfile ~= nil then
+				modpackfile:close()
+				toadd.is_modpack = true
+				table.insert(retval,toadd)
+				get_mods(path .. DIR_DELIM .. mods[i],retval,mods[i])
+			else
+				table.insert(retval,toadd)
 			end
 		end
 	end
@@ -94,7 +94,7 @@ function modmgr.getbasefolder(temppath)
 				}
 	end
 
-	local subdirs = core.get_dir_list(temppath, true)
+	local subdirs = core.get_dirlist(temppath,true)
 
 	--only single mod or modpack allowed
 	if #subdirs ~= 1 then
@@ -321,10 +321,8 @@ function modmgr.get_worldconfig(worldpath)
 	for key,value in pairs(worldfile:to_table()) do
 		if key == "gameid" then
 			worldconfig.id = value
-		elseif key:sub(0, 9) == "load_mod_" then
-			worldconfig.global_mods[key] = core.is_yes(value)
 		else
-			worldconfig[key] = value
+			worldconfig.global_mods[key] = core.is_yes(value)
 		end
 	end
 
@@ -412,7 +410,7 @@ function modmgr.preparemodlist(data)
 
 	for i=1,#global_mods,1 do
 		global_mods[i].typ = "global_mod"
-		retval[#retval + 1] = global_mods[i]
+		table.insert(retval,global_mods[i])
 	end
 
 	--read game mods
@@ -421,7 +419,7 @@ function modmgr.preparemodlist(data)
 
 	for i=1,#game_mods,1 do
 		game_mods[i].typ = "game_mod"
-		retval[#retval + 1] = game_mods[i]
+		table.insert(retval,game_mods[i])
 	end
 
 	if data.worldpath == nil then

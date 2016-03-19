@@ -21,13 +21,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define MG_DECORATION_HEADER
 
 #include <set>
-#include "objdef.h"
-#include "noise.h"
-#include "nodedef.h"
+#include "mapgen.h"
 
+struct NoiseParams;
 class Mapgen;
-class MMVManip;
-class PcgRandom;
+class ManualMapVoxelManipulator;
+class PseudoRandom;
 class Schematic;
 
 enum DecorationType {
@@ -36,12 +35,10 @@ enum DecorationType {
 	DECO_LSYSTEM
 };
 
-#define DECO_PLACE_CENTER_X  0x01
-#define DECO_PLACE_CENTER_Y  0x02
-#define DECO_PLACE_CENTER_Z  0x04
-#define DECO_USE_NOISE       0x08
-#define DECO_FORCE_PLACEMENT 0x10
-#define DECO_LIQUID_SURFACE  0x20
+#define DECO_PLACE_CENTER_X 0x01
+#define DECO_PLACE_CENTER_Y 0x02
+#define DECO_PLACE_CENTER_Z 0x04
+#define DECO_USE_NOISE      0x08
 
 extern FlagDesc flagdesc_deco[];
 
@@ -61,57 +58,58 @@ struct CutoffData {
 };
 #endif
 
-class Decoration : public ObjDef, public NodeResolver {
+class Decoration : public GenElement {
 public:
-	Decoration();
-	virtual ~Decoration();
-
-	virtual void resolveNodeNames();
-
-	size_t placeDeco(Mapgen *mg, u32 blockseed, v3s16 nmin, v3s16 nmax);
-	//size_t placeCutoffs(Mapgen *mg, u32 blockseed, v3s16 nmin, v3s16 nmax);
-
-	virtual size_t generate(MMVManip *vm, PcgRandom *pr, v3s16 p) = 0;
-	virtual int getHeight() = 0;
+	INodeDefManager *ndef;
 
 	u32 flags;
 	int mapseed;
 	std::vector<content_t> c_place_on;
 	s16 sidelen;
-	s16 y_min;
-	s16 y_max;
 	float fill_ratio;
 	NoiseParams np;
 
 	std::set<u8> biomes;
 	//std::list<CutoffData> cutoffs;
-	//Mutex cutoff_mutex;
+	//JMutex cutoff_mutex;
+
+	Decoration();
+	virtual ~Decoration();
+
+	size_t placeDeco(Mapgen *mg, u32 blockseed, v3s16 nmin, v3s16 nmax);
+	size_t placeCutoffs(Mapgen *mg, u32 blockseed, v3s16 nmin, v3s16 nmax);
+
+	virtual size_t generate(Mapgen *mg, PseudoRandom *pr, s16 max_y, v3s16 p) = 0;
+	virtual int getHeight() = 0;
+	virtual void dropResolverEntries(NodeResolver *resolver) {}
 };
 
 class DecoSimple : public Decoration {
 public:
-	virtual size_t generate(MMVManip *vm, PcgRandom *pr, v3s16 p);
-	bool canPlaceDecoration(MMVManip *vm, v3s16 p);
-	virtual int getHeight();
-
-	virtual void resolveNodeNames();
-
 	std::vector<content_t> c_decos;
 	std::vector<content_t> c_spawnby;
 	s16 deco_height;
 	s16 deco_height_max;
 	s16 nspawnby;
+
+	~DecoSimple() {}
+
+	bool canPlaceDecoration(ManualMapVoxelManipulator *vm, v3s16 p);
+	virtual size_t generate(Mapgen *mg, PseudoRandom *pr, s16 max_y, v3s16 p);
+	virtual int getHeight();
+	virtual void dropResolverEntries(NodeResolver *resolver);
 };
 
 class DecoSchematic : public Decoration {
 public:
-	DecoSchematic();
-
-	virtual size_t generate(MMVManip *vm, PcgRandom *pr, v3s16 p);
-	virtual int getHeight();
-
 	Rotation rotation;
 	Schematic *schematic;
+	std::string filename;
+
+	~DecoSchematic() {}
+
+	virtual size_t generate(Mapgen *mg, PseudoRandom *pr, s16 max_y, v3s16 p);
+	virtual int getHeight();
 };
 
 
@@ -122,17 +120,15 @@ public:
 };
 */
 
-class DecorationManager : public ObjDefManager {
+class DecorationManager : public GenElementManager {
 public:
+	static const char *ELEMENT_TITLE;
+	static const size_t ELEMENT_LIMIT = 0x10000;
+
 	DecorationManager(IGameDef *gamedef);
-	virtual ~DecorationManager() {}
+	~DecorationManager() {}
 
-	const char *getObjectTitle() const
-	{
-		return "decoration";
-	}
-
-	static Decoration *create(DecorationType type)
+	Decoration *create(int type)
 	{
 		switch (type) {
 		case DECO_SIMPLE:
@@ -146,7 +142,9 @@ public:
 		}
 	}
 
-	size_t placeAllDecos(Mapgen *mg, u32 blockseed, v3s16 nmin, v3s16 nmax);
+	void clear();
+
+	size_t placeAllDecos(Mapgen *mg, u32 seed, v3s16 nmin, v3s16 nmax);
 };
 
 #endif

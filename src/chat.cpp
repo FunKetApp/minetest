@@ -83,7 +83,7 @@ u32 ChatBuffer::getScrollback() const
 
 const ChatLine& ChatBuffer::getLine(u32 index) const
 {
-	assert(index < getLineCount());	// pre-condition
+	assert(index < getLineCount());
 	return m_unformatted[index];
 }
 
@@ -107,8 +107,7 @@ void ChatBuffer::deleteOldest(u32 count)
 		// keep m_formatted in sync
 		if (del_formatted < m_formatted.size())
 		{
-
-			sanity_check(m_formatted[del_formatted].first);
+			assert(m_formatted[del_formatted].first);
 			++del_formatted;
 			while (del_formatted < m_formatted.size() &&
 					!m_formatted[del_formatted].first)
@@ -390,7 +389,6 @@ ChatPrompt::ChatPrompt(std::wstring prompt, u32 history_limit):
 	m_cols(0),
 	m_view(0),
 	m_cursor(0),
-	m_cursor_len(0),
 	m_nick_completion_start(0),
 	m_nick_completion_end(0)
 {
@@ -418,13 +416,20 @@ void ChatPrompt::input(const std::wstring &str)
 	m_nick_completion_end = 0;
 }
 
-void ChatPrompt::addToHistory(std::wstring line)
+std::wstring ChatPrompt::submit()
 {
+	std::wstring line = m_line;
+	m_line.clear();
 	if (!line.empty())
 		m_history.push_back(line);
 	if (m_history.size() > m_history_limit)
 		m_history.erase(m_history.begin());
 	m_history_index = m_history.size();
+	m_view = 0;
+	m_cursor = 0;
+	m_nick_completion_start = 0;
+	m_nick_completion_end = 0;
+	return line;
 }
 
 void ChatPrompt::clear()
@@ -436,15 +441,13 @@ void ChatPrompt::clear()
 	m_nick_completion_end = 0;
 }
 
-std::wstring ChatPrompt::replace(std::wstring line)
+void ChatPrompt::replace(std::wstring line)
 {
-	std::wstring old_line = m_line;
 	m_line =  line;
 	m_view = m_cursor = line.size();
 	clampView();
 	m_nick_completion_start = 0;
 	m_nick_completion_end = 0;
-	return old_line;
 }
 
 void ChatPrompt::historyPrev()
@@ -507,7 +510,7 @@ void ChatPrompt::nickCompletion(const std::list<std::string>& names, bool backwa
 		{
 			std::wstring completion = narrow_to_wide(*i);
 			if (prefix_start == 0)
-				completion += L": ";
+				completion += L":";
 			completions.push_back(completion);
 		}
 	}
@@ -537,7 +540,7 @@ void ChatPrompt::nickCompletion(const std::list<std::string>& names, bool backwa
 			}
 		}
 	}
-	std::wstring replacement = completions[replacement_index];
+	std::wstring replacement = completions[replacement_index] + L" ";
 	if (word_end < m_line.size() && isspace(word_end))
 		++word_end;
 
@@ -586,12 +589,14 @@ void ChatPrompt::cursorOperation(CursorOp op, CursorOpDir dir, CursorOpScope sco
 	s32 length = m_line.size();
 	s32 increment = (dir == CURSOROP_DIR_RIGHT) ? 1 : -1;
 
-	switch (scope) {
-	case CURSOROP_SCOPE_CHARACTER:
+	if (scope == CURSOROP_SCOPE_CHARACTER)
+	{
 		new_cursor += increment;
-		break;
-	case CURSOROP_SCOPE_WORD:
-		if (dir == CURSOROP_DIR_RIGHT) {
+	}
+	else if (scope == CURSOROP_SCOPE_WORD)
+	{
+		if (increment > 0)
+		{
 			// skip one word to the right
 			while (new_cursor < length && isspace(m_line[new_cursor]))
 				new_cursor++;
@@ -599,47 +604,39 @@ void ChatPrompt::cursorOperation(CursorOp op, CursorOpDir dir, CursorOpScope sco
 				new_cursor++;
 			while (new_cursor < length && isspace(m_line[new_cursor]))
 				new_cursor++;
-		} else {
+		}
+		else
+		{
 			// skip one word to the left
 			while (new_cursor >= 1 && isspace(m_line[new_cursor - 1]))
 				new_cursor--;
 			while (new_cursor >= 1 && !isspace(m_line[new_cursor - 1]))
 				new_cursor--;
 		}
-		break;
-	case CURSOROP_SCOPE_LINE:
+	}
+	else if (scope == CURSOROP_SCOPE_LINE)
+	{
 		new_cursor += increment * length;
-		break;
-	case CURSOROP_SCOPE_SELECTION:
-		break;
 	}
 
 	new_cursor = MYMAX(MYMIN(new_cursor, length), 0);
 
-	switch (op) {
-	case CURSOROP_MOVE:
+	if (op == CURSOROP_MOVE)
+	{
 		m_cursor = new_cursor;
-		m_cursor_len = 0;
-		break;
-	case CURSOROP_DELETE:
-		if (m_cursor_len > 0) { // Delete selected text first
-			m_line.erase(m_cursor, m_cursor_len);
-		} else {
-			m_cursor = MYMIN(new_cursor, old_cursor);
-			m_line.erase(m_cursor, abs(new_cursor - old_cursor));
+	}
+	else if (op == CURSOROP_DELETE)
+	{
+		if (new_cursor < old_cursor)
+		{
+			m_line.erase(new_cursor, old_cursor - new_cursor);
+			m_cursor = new_cursor;
 		}
-		m_cursor_len = 0;
-		break;
-	case CURSOROP_SELECT:
-		if (scope == CURSOROP_SCOPE_LINE) {
-			m_cursor = 0;
-			m_cursor_len = length;
-		} else {
-			m_cursor = MYMIN(new_cursor, old_cursor);
-			m_cursor_len += abs(new_cursor - old_cursor);
-			m_cursor_len = MYMIN(m_cursor_len, length - m_cursor);
+		else if (new_cursor > old_cursor)
+		{
+			m_line.erase(old_cursor, new_cursor - old_cursor);
+			m_cursor = old_cursor;
 		}
-		break;
 	}
 
 	clampView();
@@ -679,9 +676,6 @@ ChatBackend::~ChatBackend()
 
 void ChatBackend::addMessage(std::wstring name, std::wstring text)
 {
-	name = removeChatEscapes(name);
-	text = removeChatEscapes(text);
-
 	// Note: A message may consist of multiple lines, for example the MOTD.
 	WStrfnd fnd(text);
 	while (!fnd.atend())
@@ -780,5 +774,5 @@ void ChatBackend::scrollPageDown()
 
 void ChatBackend::scrollPageUp()
 {
-	m_console_buffer.scroll(-(s32)m_console_buffer.getRows());
+	m_console_buffer.scroll(-m_console_buffer.getRows());
 }

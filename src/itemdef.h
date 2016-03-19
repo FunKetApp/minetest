@@ -68,7 +68,6 @@ struct ItemDefinition
 	ToolCapabilities *tool_capabilities;
 	ItemGroupList groups;
 	SimpleSoundSpec sound_place;
-	SimpleSoundSpec sound_place_failed;
 	f32 range;
 
 	// Client shall immediately place this node when player places the item.

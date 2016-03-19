@@ -27,23 +27,19 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define SKY_MATERIAL_COUNT 5
 #define SKY_STAR_COUNT 200
 
-class ITextureSource;
-
 // Skybox, rendered with zbuffer turned off, before all other nodes.
 class Sky : public scene::ISceneNode
 {
 public:
 	//! constructor
-	Sky(scene::ISceneNode* parent, scene::ISceneManager* mgr, s32 id,
-			ITextureSource *tsrc);
+	Sky(scene::ISceneNode* parent, scene::ISceneManager* mgr, s32 id);
 
 	virtual void OnRegisterSceneNode();
 
 	//! renders the node.
 	virtual void render();
 
-	virtual const aabb3f &getBoundingBox() const
-	{ return m_box; }
+	virtual const core::aabbox3d<f32>& getBoundingBox() const;
 
 	// Used by Irrlicht for optimizing rendering
 	virtual video::SMaterial& getMaterial(u32 i)
@@ -75,7 +71,7 @@ public:
 	}
 
 private:
-	aabb3f m_box;
+	core::aabbox3d<f32> Box;
 	video::SMaterial m_materials[SKY_MATERIAL_COUNT];
 
 	// How much sun & moon transition should affect horizon color

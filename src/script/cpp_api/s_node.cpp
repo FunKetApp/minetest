@@ -57,7 +57,6 @@ struct EnumString ScriptApiNode::es_ContentParamType2[] =
 		{CPT2_FACEDIR, "facedir"},
 		{CPT2_WALLMOUNTED, "wallmounted"},
 		{CPT2_LEVELED, "leveled"},
-		{CPT2_DEGROTATE, "degrotate"},
 		{0, NULL},
 	};
 
@@ -82,7 +81,6 @@ struct EnumString ScriptApiNode::es_NodeBoxType[] =
 		{NODEBOX_FIXED, "fixed"},
 		{NODEBOX_WALLMOUNTED, "wallmounted"},
 		{NODEBOX_LEVELED, "leveled"},
-		{NODEBOX_CONNECTED, "connected"},
 		{0, NULL},
 	};
 
@@ -97,8 +95,6 @@ bool ScriptApiNode::node_on_punch(v3s16 p, MapNode node,
 {
 	SCRIPTAPI_PRECHECKHEADER
 
-	int error_handler = PUSH_ERROR_HANDLER(L);
-
 	INodeDefManager *ndef = getServer()->ndef();
 
 	// Push callback function on stack
@@ -110,8 +106,8 @@ bool ScriptApiNode::node_on_punch(v3s16 p, MapNode node,
 	pushnode(L, node, ndef);
 	objectrefGetOrCreate(L, puncher);
 	pushPointedThing(pointed);
-	PCALL_RES(lua_pcall(L, 4, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 4, 0, m_errorhandler))
+		scriptError();
 	return true;
 }
 
@@ -119,8 +115,6 @@ bool ScriptApiNode::node_on_dig(v3s16 p, MapNode node,
 		ServerActiveObject *digger)
 {
 	SCRIPTAPI_PRECHECKHEADER
-
-	int error_handler = PUSH_ERROR_HANDLER(L);
 
 	INodeDefManager *ndef = getServer()->ndef();
 
@@ -132,16 +126,14 @@ bool ScriptApiNode::node_on_dig(v3s16 p, MapNode node,
 	push_v3s16(L, p);
 	pushnode(L, node, ndef);
 	objectrefGetOrCreate(L, digger);
-	PCALL_RES(lua_pcall(L, 3, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 3, 0, m_errorhandler))
+		scriptError();
 	return true;
 }
 
 void ScriptApiNode::node_on_construct(v3s16 p, MapNode node)
 {
 	SCRIPTAPI_PRECHECKHEADER
-
-	int error_handler = PUSH_ERROR_HANDLER(L);
 
 	INodeDefManager *ndef = getServer()->ndef();
 
@@ -151,15 +143,13 @@ void ScriptApiNode::node_on_construct(v3s16 p, MapNode node)
 
 	// Call function
 	push_v3s16(L, p);
-	PCALL_RES(lua_pcall(L, 1, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 1, 0, m_errorhandler))
+		scriptError();
 }
 
 void ScriptApiNode::node_on_destruct(v3s16 p, MapNode node)
 {
 	SCRIPTAPI_PRECHECKHEADER
-
-	int error_handler = PUSH_ERROR_HANDLER(L);
 
 	INodeDefManager *ndef = getServer()->ndef();
 
@@ -169,15 +159,13 @@ void ScriptApiNode::node_on_destruct(v3s16 p, MapNode node)
 
 	// Call function
 	push_v3s16(L, p);
-	PCALL_RES(lua_pcall(L, 1, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 1, 0, m_errorhandler))
+		scriptError();
 }
 
 void ScriptApiNode::node_after_destruct(v3s16 p, MapNode node)
 {
 	SCRIPTAPI_PRECHECKHEADER
-
-	int error_handler = PUSH_ERROR_HANDLER(L);
 
 	INodeDefManager *ndef = getServer()->ndef();
 
@@ -188,15 +176,13 @@ void ScriptApiNode::node_after_destruct(v3s16 p, MapNode node)
 	// Call function
 	push_v3s16(L, p);
 	pushnode(L, node, ndef);
-	PCALL_RES(lua_pcall(L, 2, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 2, 0, m_errorhandler))
+		scriptError();
 }
 
 bool ScriptApiNode::node_on_timer(v3s16 p, MapNode node, f32 dtime)
 {
 	SCRIPTAPI_PRECHECKHEADER
-
-	int error_handler = PUSH_ERROR_HANDLER(L);
 
 	INodeDefManager *ndef = getServer()->ndef();
 
@@ -207,19 +193,17 @@ bool ScriptApiNode::node_on_timer(v3s16 p, MapNode node, f32 dtime)
 	// Call function
 	push_v3s16(L, p);
 	lua_pushnumber(L,dtime);
-	PCALL_RES(lua_pcall(L, 2, 1, error_handler));
-	lua_remove(L, error_handler);
+	if (lua_pcall(L, 2, 1, m_errorhandler))
+		scriptError();
 	return (bool) lua_isboolean(L, -1) && (bool) lua_toboolean(L, -1) == true;
 }
 
 void ScriptApiNode::node_on_receive_fields(v3s16 p,
 		const std::string &formname,
-		const StringMap &fields,
+		const std::map<std::string, std::string> &fields,
 		ServerActiveObject *sender)
 {
 	SCRIPTAPI_PRECHECKHEADER
-
-	int error_handler = PUSH_ERROR_HANDLER(L);
 
 	INodeDefManager *ndef = getServer()->ndef();
 
@@ -236,8 +220,8 @@ void ScriptApiNode::node_on_receive_fields(v3s16 p,
 	push_v3s16(L, p);                    // pos
 	lua_pushstring(L, formname.c_str()); // formname
 	lua_newtable(L);                     // fields
-	StringMap::const_iterator it;
-	for (it = fields.begin(); it != fields.end(); it++) {
+	std::map<std::string, std::string>::const_iterator it;
+	for (it = fields.begin(); it != fields.end(); it++){
 		const std::string &name = it->first;
 		const std::string &value = it->second;
 		lua_pushstring(L, name.c_str());
@@ -245,30 +229,27 @@ void ScriptApiNode::node_on_receive_fields(v3s16 p,
 		lua_settable(L, -3);
 	}
 	objectrefGetOrCreate(L, sender);        // player
-	PCALL_RES(lua_pcall(L, 4, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 4, 0, m_errorhandler))
+		scriptError();
 }
 
 void ScriptApiNode::node_falling_update(v3s16 p)
 {
 	SCRIPTAPI_PRECHECKHEADER
 
-	int error_handler = PUSH_ERROR_HANDLER(L);
-
 	lua_getglobal(L, "nodeupdate");
 	push_v3s16(L, p);
-	PCALL_RES(lua_pcall(L, 1, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 1, 0, m_errorhandler))
+		scriptError();
 }
 
 void ScriptApiNode::node_falling_update_single(v3s16 p)
 {
 	SCRIPTAPI_PRECHECKHEADER
 
-	int error_handler = PUSH_ERROR_HANDLER(L);
-
 	lua_getglobal(L, "nodeupdate_single");
 	push_v3s16(L, p);
-	PCALL_RES(lua_pcall(L, 1, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 1, 0, m_errorhandler))
+		scriptError();
 }
+

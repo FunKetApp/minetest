@@ -21,29 +21,21 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "cpp_api/s_internal.h"
 #include "common/c_converter.h"
 
-void ScriptApiMainMenu::setMainMenuData(MainMenuDataForScript *data)
+void ScriptApiMainMenu::setMainMenuErrorMessage(std::string errormessage)
 {
 	SCRIPTAPI_PRECHECKHEADER
 
 	lua_getglobal(L, "gamedata");
 	int gamedata_idx = lua_gettop(L);
 	lua_pushstring(L, "errormessage");
-	if (!data->errormessage.empty()) {
-		lua_pushstring(L, data->errormessage.c_str());
-	} else {
-		lua_pushnil(L);
-	}
+	lua_pushstring(L, errormessage.c_str());
 	lua_settable(L, gamedata_idx);
-	setboolfield(L, gamedata_idx, "reconnect_requested",
-		data->reconnect_requested);
 	lua_pop(L, 1);
 }
 
 void ScriptApiMainMenu::handleMainMenuEvent(std::string text)
 {
 	SCRIPTAPI_PRECHECKHEADER
-
-	int error_handler = PUSH_ERROR_HANDLER(L);
 
 	// Get handler function
 	lua_getglobal(L, "core");
@@ -57,15 +49,13 @@ void ScriptApiMainMenu::handleMainMenuEvent(std::string text)
 
 	// Call it
 	lua_pushstring(L, text.c_str());
-	PCALL_RES(lua_pcall(L, 1, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 1, 0, m_errorhandler))
+		scriptError();
 }
 
-void ScriptApiMainMenu::handleMainMenuButtons(const StringMap &fields)
+void ScriptApiMainMenu::handleMainMenuButtons(std::map<std::string, std::string> fields)
 {
 	SCRIPTAPI_PRECHECKHEADER
-
-	int error_handler = PUSH_ERROR_HANDLER(L);
 
 	// Get handler function
 	lua_getglobal(L, "core");
@@ -79,8 +69,8 @@ void ScriptApiMainMenu::handleMainMenuButtons(const StringMap &fields)
 
 	// Convert fields to a Lua table
 	lua_newtable(L);
-	StringMap::const_iterator it;
-	for (it = fields.begin(); it != fields.end(); ++it) {
+	std::map<std::string, std::string>::const_iterator it;
+	for (it = fields.begin(); it != fields.end(); it++){
 		const std::string &name = it->first;
 		const std::string &value = it->second;
 		lua_pushstring(L, name.c_str());
@@ -89,7 +79,7 @@ void ScriptApiMainMenu::handleMainMenuButtons(const StringMap &fields)
 	}
 
 	// Call it
-	PCALL_RES(lua_pcall(L, 1, 0, error_handler));
-	lua_pop(L, 1);  // Pop error handler
+	if (lua_pcall(L, 1, 0, m_errorhandler))
+		scriptError();
 }
 

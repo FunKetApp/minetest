@@ -20,7 +20,7 @@ function core.privs_to_string(privs, delim)
 	local list = {}
 	for priv, bool in pairs(privs) do
 		if bool then
-			list[#list + 1] = priv
+			table.insert(list, priv)
 		end
 	end
 	return table.concat(list, delim)
@@ -171,7 +171,6 @@ function core.register_authentication_handler(handler)
 	end
 	core.registered_auth_handler = handler
 	core.registered_auth_handler_modname = core.get_current_modname()
-	handler.mod_origin = core.registered_auth_handler_modname
 end
 
 function core.get_auth_handler()

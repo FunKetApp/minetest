@@ -18,6 +18,18 @@ core.register_entity(":__builtin:falling_node", {
 
 	set_node = function(self, node)
 		self.node = node
+		local stack = ItemStack(node.name)
+		local itemtable = stack:to_table()
+		local itemname = nil
+		if itemtable then
+			itemname = stack:to_table().name
+		end
+		local item_texture = nil
+		local item_type = ""
+		if core.registered_items[itemname] then
+			item_texture = core.registered_items[itemname].inventory_image
+			item_type = core.registered_items[itemname].type
+		end
 		local prop = {
 			is_visible = true,
 			textures = {node.name},
@@ -31,9 +43,7 @@ core.register_entity(":__builtin:falling_node", {
 
 	on_activate = function(self, staticdata)
 		self.object:set_armor_groups({immortal=1})
-		if staticdata then
-			self:set_node({name=staticdata})
-		end
+		self:set_node({name=staticdata})
 	end,
 
 	on_step = function(self, dtime)

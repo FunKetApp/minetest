@@ -41,19 +41,16 @@ public:
 	void setCube(const TileSpec tiles[6],
 			v3f wield_scale, ITextureSource *tsrc);
 	void setExtruded(const std::string &imagename,
-			v3f wield_scale, ITextureSource *tsrc, u8 num_frames);
+			v3f wield_scale, ITextureSource *tsrc);
 	void setItem(const ItemStack &item, IGameDef *gamedef);
 
 	// Sets the vertex color of the wield mesh.
 	// Must only be used if the constructor was called with lighting = false
 	void setColor(video::SColor color);
 
-	scene::IMesh *getMesh()
-	{ return m_meshnode->getMesh(); }
-
 	virtual void render();
 
-	virtual const aabb3f &getBoundingBox() const
+	virtual const core::aabbox3d<f32>& getBoundingBox() const
 	{ return m_bounding_box; }
 
 private:
@@ -74,11 +71,7 @@ private:
 	// Bounding box culling is disabled for this type of scene node,
 	// so this variable is just required so we can implement
 	// getBoundingBox() and is set to an empty box.
-	aabb3f m_bounding_box;
+	core::aabbox3d<f32> m_bounding_box;
 };
 
-scene::IMesh *getItemMesh(IGameDef *gamedef, const ItemStack &item);
-
-scene::IMesh *getExtrudedMesh(ITextureSource *tsrc,
-		const std::string &imagename);
 #endif

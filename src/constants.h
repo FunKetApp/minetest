@@ -64,8 +64,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // The absolute working limit is (2^15 - viewing_range).
 // I really don't want to make every algorithm to check if it's going near
 // the limit or not, so this is lower.
-// This is the maximum value the setting map_generation_limit can be
-#define MAX_MAP_GENERATION_LIMIT (31000)
+#define MAP_GENERATION_LIMIT (31000)
 
 // Size of node in floating-point units
 // The original idea behind this is to disallow plain casts between
@@ -90,30 +89,17 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // Maximum hit points of a player
 #define PLAYER_MAX_HP 20
 
-// Maximal breath of a player
-#define PLAYER_MAX_BREATH 11
-
 // Number of different files to try to save a player to if the first fails
 // (because of a case-insensitive filesystem)
 // TODO: Use case-insensitive player names instead of this hack.
 #define PLAYER_FILE_ALTERNATE_TRIES 1000
 
-// For screenshots a serial number is appended to the filename + datetimestamp
-// if filename + datetimestamp is not unique.
-// This is the maximum number of attempts to try and add a serial to the end of
-// the file attempting to ensure a unique filename
-#define SCREENSHOT_MAX_SERIAL_TRIES 1000
-
 /*
-    GUI related things
-*/
-
-// TODO: implement dpi-based scaling for windows and remove this hack
-#if defined(_WIN32)
-	#define TTF_DEFAULT_FONT_SIZE   (18)
-#else
-	#define TTF_DEFAULT_FONT_SIZE	(15)
-#endif
-#define DEFAULT_FONT_SIZE       (10)
+ *    GUI related things
+ */
+#define LEGACY_SCALING                                     (2./3.)
+#define TTF_DEFAULT_FONT_SIZE              (12.0 / LEGACY_SCALING)
+#define DEFAULT_FONT_SIZE                                     (14)
 
 #endif
+
