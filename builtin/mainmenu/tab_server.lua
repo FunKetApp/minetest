@@ -25,15 +25,15 @@ local function get_formspec(tabview, name, tabdata)
 	local retval =
 		"button[4,4.15;2.6,0.5;world_delete;" .. fgettext("Delete") .. "]" ..
 		"button[6.5,4.15;2.8,0.5;world_create;" .. fgettext("New") .. "]" ..
-		"button[9.2,4.15;2.55,0.5;world_configure;" .. fgettext("Configure") .. "]" ..
+		--"button[9.2,4.15;2.55,0.5;world_configure;" .. fgettext("Configure") .. "]" ..
 		"button[8.5,4.95;3.25,0.5;start_server;" .. fgettext("Start Game") .. "]" ..
 		"label[4,-0.25;" .. fgettext("Select World:") .. "]" ..
 		"checkbox[0.25,0.25;cb_creative_mode;" .. fgettext("Creative Mode") .. ";" ..
 		dump(core.setting_getbool("creative_mode")) .. "]" ..
 		"checkbox[0.25,0.7;cb_enable_damage;" .. fgettext("Enable Damage") .. ";" ..
 		dump(core.setting_getbool("enable_damage")) .. "]" ..
-		"checkbox[0.25,1.15;cb_server_announce;" .. fgettext("Public") .. ";" ..
-		dump(core.setting_getbool("server_announce")) .. "]" ..
+		--"checkbox[0.25,1.15;cb_server_announce;" .. fgettext("Public") .. ";" ..
+		--dump(core.setting_getbool("server_announce")) .. "]" ..
 		"label[0.25,2.2;" .. fgettext("Name/Password") .. "]" ..
 		"field[0.55,3.2;3.5,0.5;te_playername;;" ..
 		core.formspec_escape(core.setting_get("name")) .. "]" ..
@@ -48,6 +48,7 @@ local function get_formspec(tabview, name, tabdata)
 			core.formspec_escape(core.setting_get("port")) .. "]"
 	else
 		retval = retval ..
+            "label[4,4.8; IP Address: " .. core.setting_get("mobile_ip_address") .. "]" ..
 			"field[0.55,5.2;3.5,0.5;te_serverport;" .. fgettext("Server Port") .. ";" ..
 			core.formspec_escape(core.setting_get("port")) .. "]"
 	end

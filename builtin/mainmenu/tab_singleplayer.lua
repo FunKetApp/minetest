@@ -82,18 +82,23 @@ local function get_formspec(tabview, name, tabdata)
 				)
 
 	retval = retval ..
-			"button[4,4.15;2.6,0.5;world_delete;".. fgettext("Delete") .. "]" ..
-			"button[6.5,4.15;2.8,0.5;world_create;".. fgettext("New") .. "]" ..
-			"button[9.2,4.15;2.55,0.5;world_configure;".. fgettext("Configure") .. "]" ..
-			"button[8.5,4.95;3.25,0.5;play;".. fgettext("Play") .. "]" ..
+			"button[4,3.8;2.8,0.5;world_delete;".. fgettext("Delete") .. "]" ..
+			"button[8,3.8;2.8,0.5;world_create;".. fgettext("New") .. "]" ..
+			--"button[9.2,4.15;2.55,0.5;world_configure;".. fgettext("Configure") .. "]" ..
+			"button[8,4.7;3.25,0.8;play;".. fgettext("Play") .. "]" ..
 			"label[4,-0.25;".. fgettext("Select World:") .. "]"..
 			"checkbox[0.25,0.25;cb_creative_mode;".. fgettext("Creative Mode") .. ";" ..
 			dump(core.setting_getbool("creative_mode")) .. "]"..
 			"checkbox[0.25,0.7;cb_enable_damage;".. fgettext("Enable Damage") .. ";" ..
 			dump(core.setting_getbool("enable_damage")) .. "]"..
-			"textlist[4,0.25;7.5,3.7;sp_worlds;" ..
+			"textlist[4,0.25;7.5,3.2;sp_worlds;" ..
 			menu_render_worldlist() ..
 			";" .. index .. "]"
+
+    if core.setting_get("versiontype") == "lite" then
+        retval = retval ..
+             "button[4,4.7;2.8,0.5;full_version;".. fgettext("Full Version") .. "]"
+    end
 	return retval
 end
 
@@ -135,7 +140,10 @@ local function main_button_handler(this, fields, name, tabdata)
 		world_doubleclick or
 		fields["key_enter"] then
 		local selected = core.get_textlist_index("sp_worlds")
-		
+
+        if selected == nil then
+            selected = 0
+        end
 		if selected ~= nil then
 			gamedata.selected_world = menudata.worldlist:get_raw_index(selected)
 			gamedata.singleplayer   = true
@@ -153,6 +161,13 @@ local function main_button_handler(this, fields, name, tabdata)
 		mm_texture.update("singleplayer",current_game())
 		return true
 	end
+
+    if fields["full_version"] ~= nil then
+        core.fullversion()
+        return true
+    end
+
+
 
 	if fields["world_delete"] ~= nil then
 		local selected = core.get_textlist_index("sp_worlds")

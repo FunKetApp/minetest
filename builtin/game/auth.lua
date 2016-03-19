@@ -94,23 +94,31 @@ core.builtin_auth_handler = {
 		end
 		-- Figure out what privileges the player should have.
 		-- Take a copy of the privilege table
-		local privileges = {}
-		for priv, _ in pairs(core.auth_table[name].privileges) do
-			privileges[priv] = true
-		end
-		-- If singleplayer, give all privileges except those marked as give_to_singleplayer = false
-		if core.is_singleplayer() then
-			for priv, def in pairs(core.registered_privileges) do
-				if def.give_to_singleplayer then
-					privileges[priv] = true
-				end
-			end
-		-- For the admin, give everything
-		elseif name == core.setting_get("name") then
-			for priv, def in pairs(core.registered_privileges) do
-				privileges[priv] = true
-			end
-		end
+        local privileges = {}
+        for priv, _ in pairs(core.auth_table[name].privileges) do
+        privileges[priv] = true
+        end
+        --[[
+        -- If singleplayer, give all privileges except those marked as give_to_singleplayer = false
+        if core.is_singleplayer() then
+        for priv, def in pairs(core.registered_privileges) do
+        if def.give_to_singleplayer then
+        privileges[priv] = true
+        end
+        end
+        -- For the admin, give everything
+        elseif name == core.setting_get("name") then
+        for priv, def in pairs(core.registered_privileges) do
+        privileges[priv] = true
+        end
+        end
+        --]]
+        if minetest.setting_getbool("creative_mode") then
+        for priv, def in pairs(core.registered_privileges) do
+        privileges[priv] = true
+        end
+        else
+        end
 		-- All done
 		return {
 			password = core.auth_table[name].password,

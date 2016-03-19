@@ -1,4 +1,6 @@
-uniform sampler2D baseTexture;
+precision mediump float;
+
+uniform sampler2D uTextureUnit0;
 uniform sampler2D normalTexture;
 uniform sampler2D useNormalmap;
 
@@ -14,6 +16,9 @@ varying vec3 tsEyeVec;
 varying vec3 lightVec;
 varying vec3 tsLightVec;
 
+varying vec2 varTexCoord0;
+varying vec4 varVertexColor;
+
 bool normalTexturePresent = false; 
 
 const float e = 2.718281828459;
@@ -24,7 +29,7 @@ float intensity (vec3 color){
 }
 
 float get_rgb_height (vec2 uv){
-	return intensity(texture2D(baseTexture,uv).rgb);
+	return intensity(texture2D(uTextureUnit0,uv).rgb);
 }
 
 vec4 get_normal_map(vec2 uv){
@@ -38,7 +43,7 @@ void main (void)
 {
 	vec3 color;
 	vec4 bump;
-	vec2 uv = gl_TexCoord[0].st;
+	vec2 uv = varTexCoord0;
 	bool use_normalmap = false;
 	
 #ifdef USE_NORMALMAPS
@@ -79,7 +84,7 @@ void main (void)
 	}
 #endif
 
-vec4 base = texture2D(baseTexture, uv).rgba;
+vec4 base = texture2D(uTextureUnit0, uv).rgba;
 	
 #ifdef ENABLE_BUMPMAPPING
 	if (use_normalmap){
@@ -96,9 +101,9 @@ vec4 base = texture2D(baseTexture, uv).rgba;
 #endif
 
 #if MATERIAL_TYPE == TILE_MATERIAL_LIQUID_TRANSPARENT || MATERIAL_TYPE == TILE_MATERIAL_LIQUID_OPAQUE
-	float alpha = gl_Color.a;
+	float alpha = varVertexColor.a;
 	vec4 col = vec4(color.rgb, alpha);
-	col *= gl_Color;
+	col *= varVertexColor;
 	if(fogDistance != 0.0){
 		float d = max(0.0, min(vPosition.z / fogDistance * 1.5 - 0.6, 1.0));
 		alpha = mix(alpha, 0.0, d);
@@ -106,7 +111,7 @@ vec4 base = texture2D(baseTexture, uv).rgba;
 	gl_FragColor = vec4(col.rgb, alpha);
 #else
 	vec4 col = vec4(color.rgb, base.a);
-	col *= gl_Color;
+	col *= varVertexColor;
 	if(fogDistance != 0.0){
 		float d = max(0.0, min(vPosition.z / fogDistance * 1.5 - 0.6, 1.0));
 		col = mix(col, skyBgColor, d);
