@@ -1,6 +1,13 @@
 ﻿This is a fork of Minetest. we use the 0.4.11 and update some UI.
 you can always use the lastest version if you want. check https://github.com/minetest for details.
+
+subgames source links:
+Minetest Game (https://github.com/minetest/minetest_game)
+BlockLife (https://blockcolor.net/)
+Tutorial (https://repo.or.cz/minetest_tutorial_subgame.git)
+
 send us email if you have any questions FunKetApp AT gmail.com
+
 Minetest
 ========
 
