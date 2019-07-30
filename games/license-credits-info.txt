@@ -1,0 +1,4 @@
+Please check links for more details. For mobile use, we deleted some files to reduce the app size.
+Minetest Game (https://github.com/minetest/minetest_game)
+BlockLife (https://blockcolor.net/)
+Tutorial (https://repo.or.cz/minetest_tutorial_subgame.git)
